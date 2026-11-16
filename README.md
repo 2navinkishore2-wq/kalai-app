@@ -463,3 +463,12 @@ new version. The feed can be overridden for testing with
 
 The **first** updater-enabled release has to be installed by hand (older builds have no updater);
 every later release is discoverable from inside the app.
+
+### 14.7 Helper scripts
+
+| Script | Purpose |
+|---|---|
+| `npx tsx scripts/verify-feed.ts [currentVersion] [feedUrl]` | Fetches the published feed, parses it with the app's own code and checks both installer URLs. Run it after publishing. |
+| `node scripts/finalize-release.cjs` | Rewrites `latest.json`, `SHA256SUMS.txt`, `build-info.json` and the notes with the final sizes/hashes (edit the hashes at the top of the file first). |
+| `node scripts/publish-release.cjs [repo…]` | Creates the GitHub Release for `v<version>` and uploads the four assets. |
+| `node scripts/replace-release-assets.cjs [repo…]` | Replaces the assets and body of an existing release with rebuilt files. |
