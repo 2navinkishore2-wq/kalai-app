@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">KALAI DIGITAL</string>
+    <string name="title_activity_main">KALAI DIGITAL</string>
+    <string name="package_name">com.kalaidigital.billing</string>
+    <string name="custom_url_scheme">com.kalaidigital.billing</string>
+</resources>
