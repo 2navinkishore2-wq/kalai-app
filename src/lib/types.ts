@@ -111,6 +111,12 @@ export interface BillItem {
   key: string;
   product: ProductKey;
   label: string;
+  /**
+   * Optional "who is this print for" name (1.7.0+). Purely descriptive: it
+   * never changes the customer, the rate or any calculation, and older items
+   * simply do not have it.
+   */
+  itemName?: string;
   widthIn?: number;
   heightIn?: number;
   /** Dimensions exactly as typed, with the unit used on the entry form. */

@@ -19,7 +19,7 @@ const https = require('https');
 const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
-const { spawn } = require('child_process');
+const { launchAfterExit } = require('./updateLauncher.cjs');
 
 const DIST_DIR = path.join(__dirname, '..', 'dist');
 
@@ -90,11 +90,30 @@ function startServer(port) {
 }
 
 let win = null;
+let mainServer = null;
+// True from the moment the app commits to installing an update until it exits.
+// New windows, new update requests and background work are refused from then on.
+let isQuitting = false;
+let stagedInstaller = null;
 
 /* ---------------------------------------------------------------- updates
  * The renderer only supplies the published asset URL, a file name and the
  * SHA-256 from the release feed. The main process is the only part that
  * touches the network and the file system.
+ *
+ * ORDER MATTERS (this is the bug that blocked 1.5.0 → 1.6.0):
+ * the NSIS installer used to be spawned as a CHILD of this process and this
+ * process then called app.quit() 1.5 s later. electron-builder's installer
+ * deliberately skips its "close the running app" logic when its own parent
+ * process is the app executable (it assumes the app has already exited), so
+ * it went straight to unpacking and hit locked files — "KALAI DIGITAL cannot
+ * be closed". On top of that the local HTTP server was never closed, which
+ * kept the Electron main process alive even after every window was gone.
+ *
+ * The fixed sequence: download to %TEMP% → verify SHA-256 (and PE header) →
+ * hand the installer to a detached helper that waits for THIS process id to
+ * disappear → close windows, stop the server, quit → the helper starts the
+ * installer only after the app is really gone.
  */
 function downloadFile(url, destination, redirects = 0) {
   return new Promise((resolve, reject) => {
@@ -144,32 +163,140 @@ ipcMain.handle('kalai:open-external', async (_event, url) => {
   return true;
 });
 
-ipcMain.handle('kalai:update-install', async (_event, payload) => {
+/** Downloads the installer and proves it is the published, complete file. */
+async function stageInstaller(payload) {
   const url = payload && typeof payload.url === 'string' ? payload.url : '';
   if (!/^https:\/\//i.test(url)) throw new Error('The update URL must use HTTPS.');
 
-  const rawName = String((payload && payload.fileName) || '').trim() || `KALAI-DIGITAL-Setup-${Date.now()}.exe`;
+  const rawName = String((payload && payload.fileName) || '').trim() || 'KALAI-DIGITAL-Setup.exe';
   const fileName = path.basename(rawName).replace(/[^\w.\- ]+/g, '_');
   if (!/\.exe$/i.test(fileName)) throw new Error('The update is not a Windows installer.');
 
-  const destination = path.join(app.getPath('temp'), fileName);
-  await downloadFile(url, destination);
-
+  // A checksum is mandatory: the app must never run an unverified executable.
   const expected = String((payload && payload.sha256) || '').trim().toLowerCase();
-  if (expected) {
-    const actual = sha256Of(destination);
-    if (actual !== expected) {
-      await fs.promises.unlink(destination).catch(() => {});
-      throw new Error('The downloaded installer did not match its published SHA-256 checksum.');
-    }
+  if (!/^[a-f0-9]{64}$/.test(expected)) {
+    throw new Error(
+      'This update has no published checksum, so it was not installed. Please download the installer from the release page.'
+    );
   }
 
-  const installer = spawn(destination, [], { detached: true, stdio: 'ignore' });
-  installer.unref();
+  const destination = path.join(app.getPath('temp'), fileName);
+  let actual = null;
+  if (fs.existsSync(destination)) {
+    try {
+      actual = sha256Of(destination);
+    } catch {
+      actual = null;
+    }
+  }
+  if (actual !== expected) {
+    await downloadFile(url, destination);
+    actual = sha256Of(destination);
+  }
+  if (actual !== expected) {
+    await fs.promises.unlink(destination).catch(() => {});
+    throw new Error(
+      'The downloaded installer did not match its published SHA-256 checksum, so it was not installed. Please try again.'
+    );
+  }
 
-  // Give the installer a moment to start before releasing the app files.
-  setTimeout(() => app.quit(), 1500);
-  return { ok: true, path: destination };
+  const stat = await fs.promises.stat(destination);
+  if (stat.size < 1024 * 1024) {
+    await fs.promises.unlink(destination).catch(() => {});
+    throw new Error('The downloaded installer is incomplete. Please try again.');
+  }
+  const head = Buffer.alloc(2);
+  const handle = await fs.promises.open(destination, 'r');
+  try {
+    await handle.read(head, 0, 2, 0);
+  } finally {
+    await handle.close();
+  }
+  if (head.toString('latin1') !== 'MZ') {
+    await fs.promises.unlink(destination).catch(() => {});
+    throw new Error('The downloaded file is not a Windows installer. Please try again.');
+  }
+
+  stagedInstaller = {
+    path: destination,
+    sha256: actual,
+    size: stat.size,
+    version: String((payload && payload.version) || '')
+  };
+  return stagedInstaller;
+}
+
+/**
+ * Detached hand-off: installs only after this process has exited. The helper
+ * also receives the installed .exe path and the expected version so it can
+ * prove the update really landed (the installer's own exit code is unreliable).
+ */
+function launchInstallerAfterExit(installerPath, expectedVersion) {
+  return launchAfterExit(installerPath, {
+    pid: process.pid,
+    tempDir: app.getPath('temp'),
+    expectedVersion,
+    appExe: process.execPath
+  });
+}
+
+function stopLocalServer() {
+  if (!mainServer) return;
+  try {
+    mainServer.close();
+  } catch {
+    /* already closed */
+  }
+  try {
+    if (typeof mainServer.closeAllConnections === 'function') mainServer.closeAllConnections();
+  } catch {
+    /* no active connections */
+  }
+  mainServer = null;
+}
+
+/**
+ * Closes the app for good: no windows, no local server, no timers holding the
+ * event loop. A hard exit is only a last resort if something refuses to release
+ * the process, so the installer's helper is never left waiting.
+ */
+function beginUpdateShutdown() {
+  if (isQuitting && !mainServer) return;
+  isQuitting = true;
+
+  setTimeout(() => {
+    for (const window of BrowserWindow.getAllWindows()) {
+      try {
+        window.removeAllListeners('close');
+        window.destroy();
+      } catch {
+        /* already destroyed */
+      }
+    }
+    win = null;
+    stopLocalServer();
+    app.quit();
+    setTimeout(() => app.exit(0), 4000);
+  }, 600);
+}
+
+ipcMain.handle('kalai:update-install', async (_event, payload) => {
+  if (isQuitting) throw new Error('KALAI DIGITAL is already closing for the update.');
+
+  // 1. Download and verify first: nothing is closed until the package is proven.
+  const staged = await stageInstaller(payload);
+
+  // 2. Hand over to the detached helper while the app is still alive; it waits
+  //    for this exact process id, so installation starts only after we exit.
+  if (!launchInstallerAfterExit(staged.path, staged.version)) {
+    throw new Error(
+      'The installer could not be started. Nothing was changed — please download the installer from the release page.'
+    );
+  }
+
+  // 3. Close windows, flush the local server and exit.
+  beginUpdateShutdown();
+  return { ok: true, path: staged.path, sha256: staged.sha256, size: staged.size };
 });
 
 async function createWindow() {
@@ -183,10 +310,13 @@ async function createWindow() {
     // instance keeps working; persistence belongs to the first instance.
     server = await startServer(0);
   }
+  mainServer = server;
   const port = server.address().port;
   // Bind stays on loopback (127.0.0.1) for security; the app ORIGIN uses
   // `localhost` so Firebase Auth's authorized-domain check passes.
   const url = `http://localhost:${port}/`;
+
+      if (isQuitting) return;
 
   win = new BrowserWindow({
     width: 1280,
@@ -234,13 +364,34 @@ async function createWindow() {
   win.loadURL(url);
 }
 
-app.whenReady().then(() => {
-  createWindow();
-  app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) createWindow();
-  });
-});
+// One instance only: a second launch focuses the open window instead of adding
+// another process that would also have to be closed before an update.
+const hasSingleInstanceLock = app.requestSingleInstanceLock();
 
-app.on('window-all-closed', () => {
-  if (process.platform !== 'darwin') app.quit();
-});
+if (!hasSingleInstanceLock) {
+  app.quit();
+} else {
+  app.on('second-instance', () => {
+    if (!win || win.isDestroyed()) return;
+    if (win.isMinimized()) win.restore();
+    win.show();
+    win.focus();
+  });
+
+  app.whenReady().then(() => {
+    createWindow();
+    app.on('activate', () => {
+      if (isQuitting) return;
+      if (BrowserWindow.getAllWindows().length === 0) createWindow();
+    });
+  });
+
+  app.on('window-all-closed', () => {
+    if (process.platform !== 'darwin') app.quit();
+  });
+
+  // Release the loopback HTTP server on every quit path. An open listener kept
+  // the process (and its locked files) alive after the windows had gone.
+  app.on('before-quit', stopLocalServer);
+  app.on('will-quit', stopLocalServer);
+}

@@ -3,7 +3,7 @@ import { formatDate, formatINR } from '../lib/format';
 import { logoSrc } from '../lib/logo';
 import { absoluteAssetUrl, paymentMobile, paymentSnapshotFor } from '../lib/payment';
 
-function esc(value: unknown): string {
+export function esc(value: unknown): string {
   return String(value ?? '')
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
@@ -12,7 +12,7 @@ function esc(value: unknown): string {
     .replace(/'/g, '&#39;');
 }
 
-function receiptHtml(bill: Bill, settings: BusinessSettings): string {
+export function receiptHtml(bill: Bill, settings: BusinessSettings): string {
   const width = settings.receiptWidth === 58 ? 58 : 80;
   const items = bill.items
     .map(
@@ -21,6 +21,7 @@ function receiptHtml(bill: Bill, settings: BusinessSettings): string {
           <td class="idx">${index + 1}</td>
           <td class="item">
             <div class="nm">${esc(item.label)}</div>
+            ${item.itemName ? `<div class="who">For: ${esc(item.itemName)}</div>` : ''}
             <div class="meta">${esc(
               item.product === 'FRAME'
                 ? `${item.frameSizeLabel || ''}${item.beading ? ` · Beading: ${item.beading}` : ''}`
@@ -82,6 +83,7 @@ function receiptHtml(bill: Bill, settings: BusinessSettings): string {
   .idx { width: 4mm; }
   .item { padding-right: 1.5mm; }
   .nm { font-weight: 700; }
+  .who { font-weight: 600; font-size: ${width === 58 ? 7 : 7.6}px; word-break: break-word; }
   .meta { text-align: left; font-size: ${width === 58 ? 6.6 : 7.2}px; }
   .amt { text-align: right; white-space: nowrap; font-weight: 600; }
   .center { text-align: center; }

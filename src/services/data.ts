@@ -58,6 +58,9 @@ export interface DataService {
 
   clearLocalData(): Promise<void>;
 
+  /** Optional: used before the Windows app closes itself to install an update. */
+  waitForPendingWrites?(timeoutMs?: number): Promise<{ pending: number; timedOut: boolean }>;
+
   isOnline(): boolean;
   onConnectivityChange(cb: (online: boolean) => void): () => void;
   getSyncStatus(): SyncStatus;

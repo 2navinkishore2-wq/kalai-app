@@ -18,7 +18,7 @@ declare global {
         fileName: string;
         sha256?: string;
         version?: string;
-      }) => Promise<{ ok: boolean; path?: string; error?: string }>;
+      }) => Promise<{ ok: boolean; path?: string; sha256?: string; size?: number; error?: string }>;
       openExternal?: (url: string) => Promise<boolean> | boolean;
       updatePlatform?: UpdatePlatform;
     };

@@ -8,6 +8,7 @@ import { billStatus, computeBillTotals, computeFrame, computeSqft } from '../lib
 import { formatINR, formatDate, isValidPhone, todayISO } from '../lib/format';
 import { round2, sum } from '../lib/money';
 import { itemKey } from '../lib/ids';
+import { ITEM_NAME_MAX, cleanItemName } from '../lib/itemName';
 import { createBill, updateBill } from '../services/bills';
 import { createCustomer, findSimilarCustomers, searchCustomers } from '../services/customers';
 import { addAudit } from '../services/audit';
@@ -25,7 +26,10 @@ interface ItemForm {
   qty: string;
   frameSizeId: string;
   beading: string;
+  /** Optional name of the person this print is for (never a customer). */
+  itemName: string;
 }
+
 
 const DEFAULT_BEADING = FRAME_BEADINGS[0].value;
 
@@ -41,7 +45,8 @@ const emptyForm = (product: ProductKey, frameSizeId = ''): ItemForm => ({
   unit: defaultUnit(product),
   qty: '1',
   frameSizeId,
-  beading: DEFAULT_BEADING
+  beading: DEFAULT_BEADING,
+  itemName: ''
 });
 
 const PAY_METHODS: PaymentMethod[] = PAYMENT_METHODS.filter((m) => m !== 'Credit');
@@ -285,7 +290,8 @@ export function BillingPage() {
       unit,
       qty: String(it.qty),
       frameSizeId: it.frameSizeId || activeFrames[0]?.id || '',
-      beading: normalizeBeading(it.beading)
+      beading: normalizeBeading(it.beading),
+      itemName: it.itemName || ''
     });
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
@@ -297,10 +303,12 @@ export function BillingPage() {
     if (form.product === 'FRAME') {
       if (!frameRow) return setFormError('Select a frame size. Add sizes in Products & Rates if the list is empty.');
       const beading = normalizeBeading(form.beading);
+      const itemName = cleanItemName(form.itemName);
       const item: BillItem = {
         key: editingKey || itemKey(),
         product: 'FRAME',
         label: 'Frame',
+        ...(itemName ? { itemName } : {}),
         frameSizeId: frameRow.id,
         frameSizeLabel: `${frameRow.width}×${frameRow.height} in`,
         beading,
@@ -328,10 +336,12 @@ export function BillingPage() {
       minChargeEnabled: productConfig.minChargeEnabled,
       rounding: productConfig.rounding
     });
+    const itemName = cleanItemName(form.itemName);
     const item: BillItem = {
       key: editingKey || itemKey(),
       product: form.product,
       label: productConfig.name,
+      ...(itemName ? { itemName } : {}),
       widthIn: round2(widthIn),
       heightIn: round2(heightIn),
       widthEntered: round2(parseFloat(form.width) || 0),
@@ -661,6 +671,20 @@ export function BillingPage() {
               </div>
             )}
 
+            <div className="input-row" style={{ marginTop: 12, maxWidth: 460 }}>
+              <Field
+                label={<span>Item Name / <span lang="ta">யாருக்கானது?</span> <span style={{ fontWeight: 400, color: 'var(--text-3)' }}>(optional)</span></span>}
+                hint="Whose print is this? Printed on the invoice. It never creates a customer or changes the price."
+              >
+                <Input
+                  value={form.itemName}
+                  onChange={(e) => setForm({ ...form, itemName: e.target.value })}
+                  maxLength={ITEM_NAME_MAX}
+                  placeholder="e.g. பஞ்சு"
+                />
+              </Field>
+            </div>
+
             {formError ? <div className="form-error" style={{ marginTop: 9 }}>{formError}</div> : null}
             <div className="row" style={{ marginTop: 12, gap: 9 }}>
               <Button onClick={addItem} disabled={form.product === 'FRAME' && !frameRow}>
@@ -686,7 +710,11 @@ export function BillingPage() {
                   <tbody>
                     {items.map((it) => (
                       <tr key={it.key}>
-                        <td data-label="Item"><div className="cell-main">{it.label}</div><div className="cell-sub">{it.note}</div></td>
+                        <td data-label="Item">
+                          <div className="cell-main">{it.label}</div>
+                          {it.itemName ? <div className="cell-sub" style={{ fontWeight: 650, color: 'var(--text-2)' }}>For: {it.itemName}</div> : null}
+                          <div className="cell-sub">{it.note}</div>
+                        </td>
                         <td data-label="Size / area">
                           {it.product === 'FRAME' ? (
                             <>

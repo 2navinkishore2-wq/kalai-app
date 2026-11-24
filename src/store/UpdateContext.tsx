@@ -2,6 +2,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import { Download, RefreshCw, ShieldCheck } from 'lucide-react';
 import { Button, Modal, SectionNote } from '../components/ui';
 import { isAndroid, isElectron, platformLabel } from '../lib/platform';
+import { flushBeforeExit } from '../lib/appShutdown';
 import {
   DEFAULT_RELEASE_PAGE,
   appVersion,
@@ -100,21 +101,47 @@ export function UpdateProvider({ children }: { children: ReactNode }) {
 
   const install = useCallback(async () => {
     if (!result.release) return;
-    // The Windows installer closes the app, so an unsaved bill must be finished
-    // first. Android keeps the app open behind the browser, so nothing is lost.
-    if (platform === 'windows' && typeof window !== 'undefined' && window.__kalaiUnsavedBill) {
-      setInstallMessage(
-        'Finish the bill you are editing first: tap Save bill (or Reset) on the New Bill screen, then choose Install update again. Nothing has been changed yet.'
-      );
+
+    if (platform === 'windows') {
+      // The Windows app really has to close before NSIS can replace its files,
+      // so an unfinished bill is never carried into an installer.
+      if (typeof window !== 'undefined' && window.__kalaiUnsavedBill) {
+        setInstallMessage(
+          'Your new bill has unsaved items. Choose "Later", save the bill (or Reset it) on the New Bill screen, then press Install update again. Nothing has been downloaded or changed yet.'
+        );
+        return;
+      }
+
+      setInstalling(true);
+      setInstallMessage('Saving pending changes…');
+      try {
+        const flush = await flushBeforeExit(4000);
+        setInstallMessage('Downloading and verifying the installer…');
+        const outcome = await installRelease(result.release, platform);
+        if (outcome.status === 'started') {
+          const queueNote =
+            flush.pending > 0
+              ? ' A few offline changes are still queued on this computer; they are kept and will sync after the update.'
+              : '';
+          setInstallMessage(
+            `Installer verified. KALAI DIGITAL is closing now and installing the update on its own — it will reopen in a few seconds. Your customers, bills, rates and settings stay on this computer.${queueNote}`
+          );
+        } else {
+          setInstallMessage(outcome.message || 'This update cannot be installed automatically. Use the release page.');
+        }
+      } catch (error) {
+        setInstallMessage((error as Error).message || 'The update could not be started. KALAI DIGITAL keeps running and nothing was changed.');
+      } finally {
+        setInstalling(false);
+      }
       return;
     }
+
     setInstalling(true);
     setInstallMessage('');
     try {
       const outcome = await installRelease(result.release, platform);
-      if (outcome.status === 'started') {
-        setInstallMessage('The installer is downloading and will start next. The app closes so it can be replaced — your saved bills are already stored.');
-      } else if (outcome.status === 'opened') {
+      if (outcome.status === 'opened') {
         setInstallMessage(
           platform === 'android'
             ? 'The APK download opened in your browser. When it finishes, tap the download notification and confirm Install. Saved bills and your account stay intact.'
@@ -175,8 +202,9 @@ export function UpdateProvider({ children }: { children: ReactNode }) {
         ) : null}
         {installMessage ? <SectionNote tone="info">{installMessage}</SectionNote> : null}
         <SectionNote tone="info">
-          Saved bills, customers and settings are kept and stay readable after the update. If the New Bill screen
-          is open with unsaved items, save or reset it first — the Windows installer closes the app.
+          Saved bills, customers and settings are kept and stay readable after the update. On Windows, KALAI DIGITAL
+          saves pending changes, closes itself, installs and reopens — the installer only starts once the app has exited.
+          If the New Bill screen has unsaved items, save or reset it first.
           {' '}
           <a
             href={release?.pageUrl || DEFAULT_RELEASE_PAGE}

@@ -12,8 +12,8 @@ One codebase runs on **Android (APK)**, **Windows (installer)** and the **web**,
 
 | Artifact | Path | Built from |
 |---|---|---|
-| Android release APK | `release/KALAI-DIGITAL-1.6.0.apk` (Gradle output `android/app/build/outputs/apk/release/app-release.apk`) | current source, package `com.kalaidigital.billing`, versionCode `7`, versionName `1.6.0`, signed with the stable release key (`android/kalai-release.jks`, not in git) |
-| Windows installer | `release/KALAI-DIGITAL-Setup-1.6.0.exe` | current source, Electron 32, version `1.6.0`, identity `com.kalaidigital.billing` |
+| Android release APK | `release/KALAI-DIGITAL-1.7.0.apk` (Gradle output `android/app/build/outputs/apk/release/app-release.apk`) | current source, package `com.kalaidigital.billing`, versionCode `9`, versionName `1.7.0`, signed with the stable release key (`android/kalai-release.jks`, not in git) |
+| Windows installer | `release/KALAI-DIGITAL-Setup-1.7.0.exe` | current source, Electron 32, version `1.7.0`, identity `com.kalaidigital.billing` |
 | Update feed | `release/latest.json` | published with every release; read by Settings → About & Updates |
 | Web / PWA | `dist/` (after `npm run build`) | Vite production build |
 
@@ -27,6 +27,7 @@ From 1.5.0 onwards the APK is signed with the stable release keystore created fo
 
 ### Billing
 - Multiple line items per bill, each with its own product, size, quantity and price.
+- **Optional item name (1.7.0+)** on every line — "யாருக்கானது?" — for the person that particular print is for. The bill still belongs to the selected customer; the name never creates a customer, changes a rate or affects a total. It is saved with the line, synced, and printed on the A4 invoice and 58/80 mm receipts.
 - Dimensions entered in **inches, centimetres or feet**; the app converts to inches and square feet.
 - **FRAME** uses the fixed size-wise price table (19 supplied sizes, ₹250–₹5,750) with a **Beading** choice (1 inch, 1½ inches, 2 inches) recorded on the bill. The supplied chart has one price per size, so beading never changes the price.
 - **FLEX / VINYL / STAR** are entered in **feet** by default and priced **per sq.ft** (opening rates ₹16 / ₹25 / ₹25). **SUNPACK** keeps its square-feet calculation with the configurable basis (default **16 sq.ft**) and owner-set rate.
@@ -163,6 +164,8 @@ The APK package is **`com.kalaidigital.billing`**. Native Google Sign-In will fa
 5. Rebuild and reinstall the APK.
 
 For a **release** APK, add the release keystore's SHA-1 as well (Google Play App Signing uses yet another SHA-1; add all that apply). Without these registrations the app still bills offline in Demo mode, but Google account sign-in on Android is not usable.
+
+**Error `[16] Account reauth failed` (fixed in 1.7.0).** This code comes from Google's Credential Manager, i.e. while the account is being handed back — before any ID token exists and before Firebase is involved. `@capgo/capacitor-social-login` 6.0.1 has no automatic recovery (and no `skipAuthOnlyAuthorizationAfterSignIn`; that arrived in later plugin majors), so `src/lib/nativeGoogle.ts` performs exactly one: it clears the cached native selection, then asks again with `filterByAuthorizedAccounts: false`. If Google refuses again the app explains the three real causes instead of looping: the OAuth consent screen must be **External**, the failing Google account must be listed under **Audience → Test users** while the app is in testing, and the APK's SHA-1 must be registered on an **Android OAuth client** in the same project as the Web client ID.
 
 ### 5.3 Environment variables
 
@@ -461,17 +464,25 @@ the `VITE_UPDATE_FEED` build variable.
 - **Check**: automatically ~2.5 s after the workspace opens (never blocks sign-in, billing or
   offline use) and on demand from **Settings → About & Updates → Check for Updates**.
 - **Comparison**: numeric dotted versions (`1.10.0 > 1.9.9`); equal or older means "up to date".
-- **Windows**: the main process downloads the installer to `%TEMP%`, verifies the published
-  SHA-256, then starts the NSIS installer and quits so its files can be replaced. The installer
-  keeps the existing `appId`, so the user's data in `%APPDATA%`/IndexedDB is untouched.
+- **Windows**: the main process downloads the installer to `%TEMP%` and refuses it unless it
+  matches the published SHA-256, is at least 1 MiB and starts with the `MZ` executable header.
+  It then hands the verified file to a detached helper and only then closes every window, closes
+  the loopback HTTP server (which is what kept 1.5.0/1.6.0 alive) and exits completely. The helper
+  waits for the app's process id to disappear, runs the installer in place, and reads the
+  installed `.exe`'s `ProductVersion` to prove the update landed (the installer's exit code is not
+  reliable). Only if that version check fails does the visible installer open for a retry. The
+  installer keeps the existing `appId` and install folder, so `%APPDATA%`/IndexedDB is untouched.
 - **Android**: the APK URL is opened in the system browser; when the download finishes Android's
   package installer asks the user to confirm the install. The new APK must be signed with the
   **same key** and carry a higher `versionCode`, otherwise Android rejects it.
 - **Failures**: offline, HTTP errors, malformed feeds and checksum mismatches each show their own
   message and never break billing. "Later" suppresses the prompt for the rest of the session.
 
-The **first** updater-enabled release has to be installed by hand (older builds have no updater);
-every later release is discoverable from inside the app.
+Automatic in-place installation on Windows is not verified end to end. 1.7.0 is therefore installed
+manually: close the app and run the downloaded setup (uninstall the old version first if a clean
+folder is preferred). It uses the same install folder, `appId` and `%APPDATA%\kalai-digital` data, so
+customers, bills, payments and rates are preserved. If an automatic update ever fails, the same
+manual install is the recovery step.
 
 ### 14.7 Helper scripts
 

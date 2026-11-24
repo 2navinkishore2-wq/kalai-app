@@ -19,6 +19,7 @@ import { LocalDataService } from '../services/localService';
 import { normalizeSettings, seedWorkspace } from '../services/seed';
 import { DEFAULT_SETTINGS, FRAME_PRICE_SEED, frameSeedId } from '../lib/constants';
 import { buildProductList } from '../lib/products';
+import { clearShutdownFlush, registerShutdownFlush } from '../lib/appShutdown';
 
 /** Why the New Bill product list looks the way it does. */
 export type ProductConfigState = 'loading' | 'ready' | 'defaults' | 'error';
@@ -164,6 +165,18 @@ export function AppProvider({ children }: { children: ReactNode }) {
       .catch(() => undefined)
       .finally(() => setSeeding(false));
   }, [user, service, service.basePath]);
+
+  // Before the Windows app closes for an update it asks the data service to
+  // settle its local write queue. Firestore keeps anything still queued in
+  // IndexedDB and replays it on the next launch, so this only shortens the gap.
+  useEffect(() => {
+    const flush = () =>
+      service.waitForPendingWrites
+        ? service.waitForPendingWrites(3000)
+        : Promise.resolve({ pending: 0, timedOut: false });
+    registerShutdownFlush(flush);
+    return () => clearShutdownFlush(flush);
+  }, [service]);
 
   // Device-level access gate (the owner manages who may open this device app).
   useEffect(() => {

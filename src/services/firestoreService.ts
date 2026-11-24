@@ -134,6 +134,29 @@ function sanitizeSyncError(raw: string): string {
   return cleaned.length > 160 ? `${cleaned.slice(0, 157)}…` : cleaned;
 }
 
+/**
+ * Firebase rejected the Google credential (or could not be reached) AFTER the
+ * native account chooser succeeded. Kept separate from the Credential Manager
+ * messages so the user is not told to fix the wrong thing.
+ */
+function firebaseCredentialMessage(error: unknown): string {
+  const err = error as { code?: string; message?: string } | undefined;
+  const code = String(err?.code || '');
+  if (/network-request-failed|unavailable|timeout/i.test(code) || /network/i.test(String(err?.message))) {
+    return 'Google sign-in worked, but Firebase could not be reached. Keep the bills saved on this device; try again when the internet connection is stable.';
+  }
+  if (/invalid-credential|invalid-id-token|invalid-idp-response|failed-precondition/i.test(code)) {
+    return 'Google returned a credential this Firebase project does not accept. Confirm VITE_GOOGLE_WEB_CLIENT_ID belongs to the same Firebase project as VITE_FIREBASE_PROJECT_ID, then rebuild the APK.';
+  }
+  if (/account-exists-with-different-credential|credential-already-in-use/i.test(code)) {
+    return 'This email is already linked to a different sign-in method in Firebase. Sign in with the original method — the existing customers and bills are untouched.';
+  }
+  if (/too-many-requests|blocked/i.test(code)) {
+    return 'Firebase temporarily blocked this sign-in attempt. Wait a minute and try again; saved billing data is not affected.';
+  }
+  return `Google sign-in worked, but Firebase Authentication rejected it (${code || 'unknown error'}). Your saved data is untouched — try again, or use another Google account.`;
+}
+
 export class FirestoreDataService implements DataService {
   readonly kind = 'firestore' as const;
   readonly isCloud = true;
@@ -148,6 +171,19 @@ export class FirestoreDataService implements DataService {
   private syncErrorListeners = new Set<(m: string | null) => void>();
   private online = typeof navigator !== 'undefined' ? navigator.onLine : true;
   private pendingWrites = 0;
+
+  /**
+   * Waits (briefly) for queued local writes to be acknowledged by the local
+   * cache before the app closes for a Windows update. Offline, the queue stays
+   * in IndexedDB and is replayed on the next launch, so this never discards it.
+   */
+  async waitForPendingWrites(timeoutMs = 3000): Promise<{ pending: number; timedOut: boolean }> {
+    const deadline = Date.now() + Math.max(0, timeoutMs);
+    while (this.pendingWrites > 0 && Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+    return { pending: this.pendingWrites, timedOut: this.pendingWrites > 0 };
+  }
   private syncStatus: SyncStatus = 'synced';
   private lastSyncError: string | null = null;
   private syncUnsub: (() => void) | null = null;
@@ -218,8 +254,14 @@ export class FirestoreDataService implements DataService {
       }
       const { idToken } = await signInWithNativeGoogle();
       const cred = GoogleAuthProvider.credential(idToken);
-      const result = await signInWithCredential(auth, cred);
-      return this.toAuthUser(result.user);
+      try {
+        const result = await signInWithCredential(auth, cred);
+        return this.toAuthUser(result.user);
+      } catch (error) {
+        // The Google account already signed in; only the Firebase exchange
+        // failed. Say which one it was instead of blaming the account picker.
+        throw new Error(firebaseCredentialMessage(error));
+      }
     }
     const cred = await signInWithPopup(auth, provider);
     return this.toAuthUser(cred.user);

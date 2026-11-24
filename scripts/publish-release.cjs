@@ -22,7 +22,8 @@ const ASSETS = [
   [`release/KALAI-DIGITAL-${VERSION}.apk`, `KALAI-DIGITAL-${VERSION}.apk`],
   [`release/KALAI-DIGITAL-Setup-${VERSION}.exe`, `KALAI-DIGITAL-Setup-${VERSION}.exe`],
   ['release/SHA256SUMS.txt', 'SHA256SUMS.txt'],
-  ['release/latest.json', 'latest.json']
+  ['release/latest.json', 'latest.json'],
+  ['release/build-info.json', 'build-info.json']
 ];
 const REPOS = ['kalai-app', 'kalai-app-releases'];
 

@@ -65,6 +65,7 @@ export function InvoiceDocument({ bill, settings }: { bill: Bill; settings: Busi
               <td data-label="#">{i + 1}</td>
               <td data-label="Item">
                 <b>{it.label}</b>
+                {it.itemName ? <div style={{ fontWeight: 600 }}>Item Name: {it.itemName}</div> : null}
                 {it.note ? <div style={{ color: '#6b5a50', fontSize: 9.5 }}>{it.note}</div> : null}
               </td>
               <td data-label="Size">

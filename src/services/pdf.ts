@@ -1,6 +1,7 @@
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
-import type { Bill, BusinessSettings, PaymentSnapshot } from '../lib/types';
+import type { Bill, BillItem, BusinessSettings, PaymentSnapshot } from '../lib/types';
+import { itemNameLabel } from '../lib/itemName';
 import { formatDate } from '../lib/format';
 import { absoluteAssetUrl, paymentMobile, paymentSnapshotFor } from '../lib/payment';
 import { isNative } from '../lib/platform';
@@ -24,6 +25,18 @@ export function safeFileName(value: string, fallback = 'file'): string {
     .replace(/_+/g, '_')
     .replace(/^_|_$/g, '');
   return cleaned || fallback;
+}
+
+/**
+ * The "Item" cell of the A4 table: product, the optional person name, then the
+ * rate note. Kept as a pure function so the invoice wording is testable.
+ */
+export function invoiceItemCell(item: BillItem): string {
+  const name = itemNameLabel(item.itemName);
+  const lines = [item.label];
+  if (name) lines.push(name);
+  if (item.note) lines.push(item.note);
+  return lines.join('\n');
 }
 
 export function billFileName(bill: Bill, ext: 'pdf' | 'jpg'): string {
@@ -264,7 +277,7 @@ export function buildInvoicePdf(bill: Bill, settings: BusinessSettings, qr: QrIm
   const body = bill.items.map((item, index) => {
     const row: string[] = [
       String(index + 1),
-      `${item.label}${item.note ? `\n${item.note}` : ''}`,
+      invoiceItemCell(item),
       item.product === 'FRAME'
         ? `${item.frameSizeLabel || ''}${item.beading ? `\nBeading: ${item.beading}` : ''}`
         : `${item.widthEntered ?? item.widthIn ?? ''}x${item.heightEntered ?? item.heightIn ?? ''} ${item.unit || 'in'}`
