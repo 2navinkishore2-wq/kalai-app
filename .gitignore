@@ -31,3 +31,6 @@ android/keystore.properties
 # Local build toolchain (JDK / Android SDK downloaded for offline builds)
 .tools/
 .cloud-attachments/
+
+# Temporary APK inspection output
+.apkcheck/
