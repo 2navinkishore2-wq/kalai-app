@@ -43,7 +43,8 @@ export function DashboardPage() {
   }, []);
 
   const stats = useMemo(
-    () => dashboardStats(app.bills, app.customers, app.payments, today),
+    // Archived customers are hidden from counts; their invoices still count.
+    () => dashboardStats(app.bills, app.customers.filter((c) => c.archived !== true), app.payments, today),
     [app.bills, app.customers, app.payments, today]
   );
 

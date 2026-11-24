@@ -1,4 +1,4 @@
-import type { Customer } from '../lib/types';
+import type { Bill, Customer, Payment } from '../lib/types';
 import type { DataService } from './data';
 
 export interface CustomerInput {
@@ -63,6 +63,78 @@ export async function updateCustomer(svc: DataService, id: string, input: Custom
     notes: (input.notes || '').trim(),
     ...(input.photo !== undefined ? { photo: input.photo } : {})
   });
+}
+
+export function isArchived(customer: Pick<Customer, 'archived'> | null | undefined): boolean {
+  return customer?.archived === true;
+}
+
+export function activeCustomers(customers: Customer[]): Customer[] {
+  return customers.filter((c) => !isArchived(c));
+}
+
+export function archivedCustomers(customers: Customer[]): Customer[] {
+  return customers.filter((c) => isArchived(c));
+}
+
+export interface CustomerLinks {
+  bills: number;
+  payments: number;
+  outstanding: number;
+  /** True when deleting the customer would orphan business records. */
+  linked: boolean;
+}
+
+/** Everything that would be orphaned by permanently deleting a customer. */
+export function customerLinks(
+  customerId: string,
+  bills: Pick<Bill, 'customerId' | 'balance'>[],
+  payments: Pick<Payment, 'customerId'>[]
+): CustomerLinks {
+  const own = bills.filter((b) => b.customerId === customerId);
+  const ownPayments = payments.filter((p) => p.customerId === customerId);
+  return {
+    bills: own.length,
+    payments: ownPayments.length,
+    outstanding: own.reduce((sum, b) => sum + (Number(b.balance) || 0), 0),
+    linked: own.length > 0 || ownPayments.length > 0
+  };
+}
+
+/**
+ * Archives a customer: hidden from the New Bill picker and the default list,
+ * but every invoice, payment and balance stays exactly as it was.
+ */
+export async function archiveCustomer(svc: DataService, id: string): Promise<void> {
+  const existing = await svc.get<Customer>('customers', id);
+  if (!existing) throw new Error('This customer no longer exists.');
+  if (existing.archived === true) return;
+  await svc.set('customers', id, { archived: true, archivedAt: new Date().toISOString() });
+}
+
+export async function restoreCustomer(svc: DataService, id: string): Promise<void> {
+  const existing = await svc.get<Customer>('customers', id);
+  if (!existing) throw new Error('This customer no longer exists.');
+  if (existing.archived !== true) return;
+  await svc.set('customers', id, { archived: false, archivedAt: '' });
+}
+
+/**
+ * Permanently deletes a customer only when nothing references it. Linked
+ * invoices/payments are never deleted — the caller archives instead.
+ */
+export async function deleteCustomer(
+  svc: DataService,
+  id: string,
+  related: { bills: Pick<Bill, 'customerId' | 'balance'>[]; payments: Pick<Payment, 'customerId'>[] }
+): Promise<void> {
+  const links = customerLinks(id, related.bills, related.payments);
+  if (links.linked) {
+    throw new Error('This customer has invoices or payments. Archive the customer instead — their history must be kept.');
+  }
+  const existing = await svc.get<Customer>('customers', id);
+  if (!existing) return;
+  await svc.delete('customers', id);
 }
 
 export function searchCustomers(customers: Customer[], query: string): Customer[] {

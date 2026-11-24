@@ -59,6 +59,12 @@ export interface Customer {
   email: string;
   notes: string;
   photo?: string;
+  /**
+   * Archived customers keep every invoice/payment and are only hidden from the
+   * default list. Missing/false means active.
+   */
+  archived?: boolean;
+  archivedAt?: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -83,6 +89,8 @@ export interface ProductConfig {
   trackStock: boolean;
   /** Stamp of the opening-rate migration already applied to this product. */
   openingRatesVersion?: number;
+  /** Stamp of the schema/activation repair already applied (see lib/products). */
+  configVersion?: number;
   createdAt: string;
   updatedAt: string;
 }

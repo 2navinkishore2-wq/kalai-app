@@ -303,11 +303,15 @@ export class FirestoreDataService implements DataService {
   }
 
   private raceLocalWrite(ref: DocumentReference, expectExists: boolean, write: Promise<unknown>): Promise<unknown> {
-    write.catch((e) => {
+    // A rejected write (offline-permission, rules, invalid field) must reach the
+    // caller so the UI can say the save failed instead of claiming success.
+    const tracked = write.catch((e) => {
       this.captureSyncError(e);
       this.setStatus('error');
+      throw e;
     });
-    return Promise.race([write, this.localApplied(ref, expectExists)]);
+    tracked.catch(() => undefined);
+    return Promise.race([tracked, this.localApplied(ref, expectExists)]);
   }
 
   private localApplied(ref: DocumentReference, expectExists: boolean): Promise<void> {

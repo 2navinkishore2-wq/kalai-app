@@ -1,13 +1,13 @@
 import { useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { ArrowLeft, Download, FileText, Mail, MapPin, Pencil, Phone, Plus, ReceiptText, StickyNote, WalletCards } from 'lucide-react';
+import { Archive, ArrowLeft, Download, FileText, Mail, MapPin, Pencil, Phone, Plus, ReceiptText, RotateCcw, StickyNote, Trash2, WalletCards } from 'lucide-react';
 import { useApp } from '../store/AppContext';
-import { updateCustomer } from '../services/customers';
+import { archiveCustomer, customerLinks, deleteCustomer, isArchived, restoreCustomer, updateCustomer } from '../services/customers';
 import { addAudit } from '../services/audit';
 import { activeBills } from '../services/analytics';
 import { formatDate, formatDateTime, formatINR } from '../lib/format';
 import { downloadReportPdf, pdfMoney, safeFileName, type ReportSection } from '../services/pdf';
-import { Avatar, Button, Card, EmptyState, Field, Input, Modal, PageHeader, SectionNote, StatCard, StatusBadge, useToast } from '../components/ui';
+import { Avatar, Button, Card, ConfirmDialog, EmptyState, Field, Input, Modal, PageHeader, Pill, SectionNote, StatCard, StatusBadge, useToast } from '../components/ui';
 
 export function CustomerDetailPage() {
   const { id } = useParams();
@@ -19,6 +19,8 @@ export function CustomerDetailPage() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [form, setForm] = useState({ name: '', phone: '', address: '', email: '', notes: '' });
+  const [confirmRemove, setConfirmRemove] = useState(false);
+  const [busy, setBusy] = useState(false);
 
   const bills = useMemo(
     () => activeBills(app.bills.filter((b) => b.customerId === id)).sort((a, b) => (a.date < b.date ? 1 : -1)),
@@ -87,6 +89,48 @@ export function CustomerDetailPage() {
     }
   };
 
+  const links = customerLinks(customer.id, app.bills, app.payments);
+
+  const toggleArchive = async () => {
+    setBusy(true);
+    try {
+      if (isArchived(customer)) {
+        await restoreCustomer(app.service, customer.id);
+        await addAudit(app.service, app.user, { entity: 'customer', entityId: customer.id, action: 'restore', summary: `Customer ${customer.name} restored` });
+        toast('Customer restored and available for billing', 'success');
+      } else {
+        await archiveCustomer(app.service, customer.id);
+        await addAudit(app.service, app.user, { entity: 'customer', entityId: customer.id, action: 'update', summary: `Customer ${customer.name} archived (invoices and payments kept)` });
+        toast('Customer archived — invoices and payments are unchanged', 'success');
+      }
+    } catch (e) {
+      toast((e as Error).message, 'error');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const remove = async () => {
+    setBusy(true);
+    try {
+      if (links.linked) {
+        await archiveCustomer(app.service, customer.id);
+        await addAudit(app.service, app.user, { entity: 'customer', entityId: customer.id, action: 'update', summary: `Customer ${customer.name} archived instead of deleted (${links.bills} invoice(s))` });
+        toast('Customer archived. All invoices and payments are untouched.', 'success');
+      } else {
+        await deleteCustomer(app.service, customer.id, { bills: app.bills, payments: app.payments });
+        await addAudit(app.service, app.user, { entity: 'customer', entityId: customer.id, action: 'delete', summary: `Customer ${customer.name} deleted (no linked records)` });
+        toast('Customer deleted', 'success');
+        navigate('/customers');
+      }
+      setConfirmRemove(false);
+    } catch (e) {
+      toast((e as Error).message, 'error');
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const downloadStatement = async () => {
     const invoiceRows = allBills.map((b) => [
       b.number,
@@ -136,18 +180,28 @@ export function CustomerDetailPage() {
   return (
     <div className="page">
       <PageHeader
-        title={customer.name}
+        title={<span>{customer.name}{isArchived(customer) ? <span style={{ marginLeft: 9, verticalAlign: 3 }}><Pill tone="neutral">Archived</Pill></span> : null}</span>}
         subtitle={`Customer since ${formatDate(customer.createdAt.slice(0, 10))}${customer.phone ? ` · ${customer.phone}` : ' · No mobile number'}`}
         eyebrow="CUSTOMER PROFILE"
         actions={
           <>
             <Button variant="ghost" onClick={() => navigate('/customers')}><ArrowLeft size={16} /> Back</Button>
             <Button variant="ghost" onClick={openEdit}><Pencil size={16} /> Edit</Button>
+            <Button variant="ghost" onClick={() => void toggleArchive()} loading={busy}>
+              {isArchived(customer) ? <><RotateCcw size={16} /> Restore</> : <><Archive size={16} /> Archive</>}
+            </Button>
+            <Button variant="ghost" onClick={() => setConfirmRemove(true)} disabled={busy}><Trash2 size={16} /> Delete</Button>
             <Button variant="ghost" onClick={() => void downloadStatement()}><Download size={16} /> Statement PDF</Button>
-            <Button onClick={() => navigate(`/billing?customer=${customer.id}`)}><Plus size={16} /> New Bill</Button>
+            <Button onClick={() => navigate(`/billing?customer=${customer.id}`)} disabled={isArchived(customer)}><Plus size={16} /> New Bill</Button>
           </>
         }
       />
+
+      {isArchived(customer) ? (
+        <SectionNote tone="warn">
+          This customer is archived. Their invoices, payments and balances are unchanged, but the customer cannot be chosen for a new bill until restored.
+        </SectionNote>
+      ) : null}
 
       <div className="grid grid-4" style={{ marginBottom: 14 }}>
         <StatCard label="Lifetime purchases" value={formatINR(totals.purchases)} icon={<ReceiptText size={16} />} tone="brand" hint={`${bills.length} active invoice${bills.length === 1 ? '' : 's'}`} />
@@ -264,6 +318,21 @@ export function CustomerDetailPage() {
         {error ? <div className="form-error" style={{ marginTop: 8 }}>{error}</div> : null}
         <div className="muted small" style={{ marginTop: 10 }}>Last updated {formatDateTime(customer.updatedAt || customer.createdAt)}</div>
       </Modal>
+
+      <ConfirmDialog
+        open={confirmRemove}
+        title={links.linked ? 'Archive this customer?' : 'Delete this customer?'}
+        message={
+          links.linked
+            ? `${customer.name} has ${links.bills} invoice${links.bills === 1 ? '' : 's'} and ${links.payments} payment record${links.payments === 1 ? '' : 's'}. Deleting would break that history, so the customer is archived instead — every invoice and payment is kept.`
+            : `Delete ${customer.name}? This action cannot be undone. The customer has no invoices or payments.`
+        }
+        confirmLabel={links.linked ? 'Archive customer' : 'Delete customer'}
+        danger={!links.linked}
+        busy={busy}
+        onConfirm={() => void remove()}
+        onCancel={() => { if (!busy) setConfirmRemove(false); }}
+      />
     </div>
   );
 }

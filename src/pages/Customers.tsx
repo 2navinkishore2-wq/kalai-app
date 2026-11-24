@@ -1,12 +1,25 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { AlertTriangle, ArrowRight, Download, IndianRupee, Pencil, Phone, Search, UserPlus, Users, WalletCards } from 'lucide-react';
+import { AlertTriangle, Archive, ArrowRight, Download, IndianRupee, Pencil, Phone, RotateCcw, Search, Trash2, UserPlus, Users, WalletCards } from 'lucide-react';
 import { useApp } from '../store/AppContext';
 import type { Customer } from '../lib/types';
-import { customerStats, findSimilarCustomers, searchCustomers, createCustomer, updateCustomer } from '../services/customers';
+import {
+  activeCustomers,
+  archiveCustomer,
+  archivedCustomers,
+  createCustomer,
+  customerLinks,
+  customerStats,
+  deleteCustomer,
+  findSimilarCustomers,
+  isArchived,
+  restoreCustomer,
+  searchCustomers,
+  updateCustomer
+} from '../services/customers';
 import { addAudit } from '../services/audit';
 import { csvEscape, downloadText, formatDate, formatINR, isValidPhone, todayISO } from '../lib/format';
-import { Avatar, Button, Card, EmptyState, Field, Input, Modal, PageHeader, SearchInput, SectionNote, StatCard, useToast } from '../components/ui';
+import { Avatar, Button, Card, ConfirmDialog, EmptyState, Field, Input, Modal, PageHeader, Pill, SearchInput, SectionNote, StatCard, useToast } from '../components/ui';
 
 interface CustomerForm {
   name: string;
@@ -27,6 +40,9 @@ export function CustomersPage() {
 
   const [query, setQuery] = useState('');
   const [sort, setSort] = useState<'recent' | 'name' | 'pending'>('recent');
+  const [view, setView] = useState<'active' | 'archived' | 'all'>('active');
+  const [pendingDelete, setPendingDelete] = useState<Customer | null>(null);
+  const [busy, setBusy] = useState(false);
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<Customer | null>(null);
   const [form, setForm] = useState<CustomerForm>(emptyForm);
@@ -48,27 +64,103 @@ export function CustomersPage() {
     }
   }, [params, navigate]);
 
+  const activeList = useMemo(() => activeCustomers(app.customers), [app.customers]);
+  const archivedList = useMemo(() => archivedCustomers(app.customers), [app.customers]);
+
   const filtered = useMemo(() => {
-    const matched = searchCustomers(app.customers, query);
+    const pool = view === 'archived' ? archivedList : view === 'all' ? app.customers : activeList;
+    const matched = searchCustomers(pool, query);
     return [...matched].sort((a, b) => {
       if (sort === 'name') return a.name.localeCompare(b.name);
       if (sort === 'pending') return (stats.get(b.id)?.pending || 0) - (stats.get(a.id)?.pending || 0);
       return a.createdAt < b.createdAt ? 1 : -1;
     });
-  }, [app.customers, query, sort, stats]);
+  }, [view, activeList, archivedList, app.customers, query, sort, stats]);
 
   const totals = useMemo(() => {
     let purchases = 0;
     let pending = 0;
     let withDue = 0;
-    for (const c of app.customers) {
+    for (const c of activeList) {
       const s = stats.get(c.id);
       purchases += s?.purchases || 0;
       pending += s?.pending || 0;
       if (s && s.pending > 0) withDue += 1;
     }
     return { purchases, pending, withDue };
-  }, [app.customers, stats]);
+  }, [activeList, stats]);
+
+  const linkInfo = useMemo(
+    () => (pendingDelete ? customerLinks(pendingDelete.id, app.bills, app.payments) : null),
+    [pendingDelete, app.bills, app.payments]
+  );
+
+  const archive = async (customer: Customer) => {
+    setBusy(true);
+    try {
+      await archiveCustomer(app.service, customer.id);
+      await addAudit(app.service, app.user, {
+        entity: 'customer',
+        entityId: customer.id,
+        action: 'update',
+        summary: `Customer ${customer.name} archived (invoices and payments kept)`
+      });
+      toast(`${customer.name} archived — invoices, payments and balances are unchanged`, 'success');
+    } catch (e) {
+      toast((e as Error).message, 'error');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const restore = async (customer: Customer) => {
+    setBusy(true);
+    try {
+      await restoreCustomer(app.service, customer.id);
+      await addAudit(app.service, app.user, {
+        entity: 'customer',
+        entityId: customer.id,
+        action: 'restore',
+        summary: `Customer ${customer.name} restored`
+      });
+      toast(`${customer.name} restored and available for billing`, 'success');
+    } catch (e) {
+      toast((e as Error).message, 'error');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const confirmRemove = async () => {
+    if (!pendingDelete) return;
+    setBusy(true);
+    try {
+      if (linkInfo?.linked) {
+        await archiveCustomer(app.service, pendingDelete.id);
+        await addAudit(app.service, app.user, {
+          entity: 'customer',
+          entityId: pendingDelete.id,
+          action: 'update',
+          summary: `Customer ${pendingDelete.name} archived instead of deleted (${linkInfo.bills} invoice(s), ${linkInfo.payments} payment(s))`
+        });
+        toast(`${pendingDelete.name} archived. All invoices and payments are untouched.`, 'success');
+      } else {
+        await deleteCustomer(app.service, pendingDelete.id, { bills: app.bills, payments: app.payments });
+        await addAudit(app.service, app.user, {
+          entity: 'customer',
+          entityId: pendingDelete.id,
+          action: 'delete',
+          summary: `Customer ${pendingDelete.name} deleted (no linked records)`
+        });
+        toast(`${pendingDelete.name} deleted`, 'success');
+      }
+      setPendingDelete(null);
+    } catch (e) {
+      toast((e as Error).message, 'error');
+    } finally {
+      setBusy(false);
+    }
+  };
 
   const openAdd = () => {
     setEditing(null);
@@ -165,7 +257,7 @@ export function CustomersPage() {
       />
 
       <div className="grid grid-4" style={{ marginBottom: 14 }}>
-        <StatCard label="Total customers" value={String(app.customers.length)} icon={<Users size={16} />} tone="brand" hint="All saved customer records" />
+        <StatCard label="Total customers" value={String(activeList.length)} icon={<Users size={16} />} tone="brand" hint={archivedList.length > 0 ? `${archivedList.length} archived` : 'All saved customer records'} />
         <StatCard label="Lifetime purchases" value={formatINR(totals.purchases)} icon={<IndianRupee size={16} />} tone="green" hint="Across all active bills" />
         <StatCard label="Outstanding" value={formatINR(totals.pending)} icon={<WalletCards size={16} />} tone="red" hint={`${totals.withDue} customer${totals.withDue === 1 ? '' : 's'} with a balance`} />
         <StatCard label="Search results" value={String(filtered.length)} icon={<Search size={16} />} tone="blue" hint="Matching the current search" />
@@ -174,6 +266,11 @@ export function CustomersPage() {
       <Card>
         <div className="row" style={{ gap: 9, marginBottom: 12, flexWrap: 'wrap' }}>
           <div style={{ flex: 1, minWidth: 230 }}><SearchInput value={query} onChange={setQuery} placeholder="Search by name or mobile number…" /></div>
+          <select className="select" style={{ width: 170 }} value={view} onChange={(e) => setView(e.target.value as 'active' | 'archived' | 'all')}>
+            <option value="active">Active customers</option>
+            <option value="archived">Archived customers</option>
+            <option value="all">All customers</option>
+          </select>
           <select className="select" style={{ width: 190 }} value={sort} onChange={(e) => setSort(e.target.value as 'recent' | 'name' | 'pending')}>
             <option value="recent">Newest first</option>
             <option value="name">Name A → Z</option>
@@ -184,8 +281,14 @@ export function CustomersPage() {
         {filtered.length === 0 ? (
           <EmptyState
             icon={<Users size={22} />}
-            title={query ? 'No matching customers' : 'No customers yet'}
-            text={query ? 'Try a different name or mobile number.' : 'Add a customer, or keep billing as Walk-in Customer — no customer record is needed.'}
+            title={query ? 'No matching customers' : view === 'archived' ? 'No archived customers' : 'No customers yet'}
+            text={
+              query
+                ? 'Try a different name or mobile number.'
+                : view === 'archived'
+                  ? 'Customers you archive stay here with all their invoices and payments, ready to restore.'
+                  : 'Add a customer, or keep billing as Walk-in Customer — no customer record is needed.'
+            }
             action={<Button size="sm" onClick={openAdd}><UserPlus size={15} /> Add Customer</Button>}
           />
         ) : (
@@ -203,7 +306,10 @@ export function CustomersPage() {
                         <div style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
                           <Avatar name={c.name} src={c.photo} size={30} />
                           <div>
-                            <div className="cell-main">{c.name}</div>
+                            <div className="cell-main">
+                              {c.name}
+                              {isArchived(c) ? <span style={{ marginLeft: 7 }}><Pill tone="neutral">Archived</Pill></span> : null}
+                            </div>
                             <div className="cell-sub">{c.address || 'No address'}</div>
                           </div>
                         </div>
@@ -215,6 +321,12 @@ export function CustomersPage() {
                       <td className="num" data-label="Pending" style={{ color: (s?.pending || 0) > 0 ? 'var(--red)' : 'var(--green)', fontWeight: 700 }}>{formatINR(s?.pending || 0)}</td>
                       <td className="actions" data-label="">
                         <button className="icon-btn" title="Edit customer" onClick={(e) => { e.stopPropagation(); openEdit(c); }}><Pencil size={14} /></button>
+                        {isArchived(c) ? (
+                          <button className="icon-btn" title="Restore customer" style={{ marginLeft: 6 }} disabled={busy} onClick={(e) => { e.stopPropagation(); void restore(c); }}><RotateCcw size={14} /></button>
+                        ) : (
+                          <button className="icon-btn" title="Archive customer" style={{ marginLeft: 6 }} disabled={busy} onClick={(e) => { e.stopPropagation(); void archive(c); }}><Archive size={14} /></button>
+                        )}
+                        <button className="icon-btn danger" title="Delete customer" style={{ marginLeft: 6 }} disabled={busy} onClick={(e) => { e.stopPropagation(); setPendingDelete(c); }}><Trash2 size={14} /></button>
                         <button className="icon-btn" title="Open customer" style={{ marginLeft: 6 }} onClick={(e) => { e.stopPropagation(); navigate(`/customers/${c.id}`); }}><ArrowRight size={15} /></button>
                       </td>
                     </tr>
@@ -273,6 +385,28 @@ export function CustomersPage() {
 
         <SectionNote tone="info">Duplicate mobiles are always flagged. Similar names are flagged as a soft warning. The app never blocks a legitimate second customer.</SectionNote>
       </Modal>
+
+      <ConfirmDialog
+        open={!!pendingDelete}
+        title={linkInfo?.linked ? 'Archive this customer?' : 'Delete this customer?'}
+        message={
+          !pendingDelete ? '' : linkInfo?.linked ? (
+            <span>
+              <b>{pendingDelete.name}</b> has {linkInfo.bills} invoice{linkInfo.bills === 1 ? '' : 's'} and {linkInfo.payments} payment record{linkInfo.payments === 1 ? '' : 's'}.
+              Deleting the customer would break that history. Archive the customer instead — invoices, payments, balances and printed names stay exactly as they are, and nothing can be selected for a new bill until it is restored.
+            </span>
+          ) : (
+            <span>
+              Delete <b>{pendingDelete.name}</b>? This action cannot be undone. The customer has no invoices or payments, so nothing else is affected.
+            </span>
+          )
+        }
+        confirmLabel={linkInfo?.linked ? 'Archive customer' : 'Delete customer'}
+        danger={!linkInfo?.linked}
+        busy={busy}
+        onConfirm={() => void confirmRemove()}
+        onCancel={() => { if (!busy) setPendingDelete(null); }}
+      />
     </div>
   );
 }

@@ -12,14 +12,14 @@ One codebase runs on **Android (APK)**, **Windows (installer)** and the **web**,
 
 | Artifact | Path | Built from |
 |---|---|---|
-| Android debug APK | `release/KALAI-DIGITAL-1.3.0.apk` (also `android/app/build/outputs/apk/debug/app-debug.apk`) | current source, package `com.kalaidigital.billing`, versionCode `4`, versionName `1.3.0` |
-| Windows installer | `release/KALAI-DIGITAL-Setup-1.3.0.exe` | current source, Electron 32, version `1.3.0` |
+| Android release APK | `release/KALAI-DIGITAL-1.6.0.apk` (Gradle output `android/app/build/outputs/apk/release/app-release.apk`) | current source, package `com.kalaidigital.billing`, versionCode `7`, versionName `1.6.0`, signed with the stable release key (`android/kalai-release.jks`, not in git) |
+| Windows installer | `release/KALAI-DIGITAL-Setup-1.6.0.exe` | current source, Electron 32, version `1.6.0`, identity `com.kalaidigital.billing` |
 | Update feed | `release/latest.json` | published with every release; read by Settings → About & Updates |
 | Web / PWA | `dist/` (after `npm run build`) | Vite production build |
 
-`release/` keeps only the two current installable artifacts plus `latest.json`, `SHA256SUMS.txt` and `build-info.json` (version, sizes, SHA-256). Older versions and intermediate installer files are removed on each release.
+`release/` keeps the installable artifacts of the current release plus `latest.json`, `SHA256SUMS.txt` and `build-info.json` (version, sizes, SHA-256).
 
-The APK here is a **debug-signed** build for testing and direct installation. It is signed with the same Android debug key as the 1.2.0 build it replaces, so it installs over the existing app in place (identical certificate SHA-256 `7fe43dfc…`). A Play-Store or long-term distribution build must be signed with your own release keystore — see §7.
+From 1.5.0 onwards the APK is signed with the stable release keystore created for this app, so each new version installs over the previous one in place. APKs from 1.4.0 and older were signed with a different (debug) key and must be uninstalled once — see §7 and §14.
 
 ---
 
@@ -481,3 +481,27 @@ every later release is discoverable from inside the app.
 | `node scripts/finalize-release.cjs` | Rewrites `latest.json`, `SHA256SUMS.txt`, `build-info.json` and the notes with the final sizes/hashes (edit the hashes at the top of the file first). |
 | `node scripts/publish-release.cjs [repo…]` | Creates the GitHub Release for `v<version>` and uploads the four assets. |
 | `node scripts/replace-release-assets.cjs [repo…]` | Replaces the assets and body of an existing release with rebuilt files. |
+
+### 14.8 Product settings repair (1.6.0+)
+
+`src/lib/products.ts` is the single normaliser for `productConfigs`, and
+`src/services/products.ts` owns saving and migrating them.
+
+- A product is unavailable **only** when a stored flag is explicitly false
+  (`active`, `isActive`, `enabled`, `billingEnabled` or `status`). A missing flag
+  from 1.3.0/1.4.0 means available — this is what produced "Flex (off)".
+- The five products are always built from `PRODUCT_KEYS`, so a partial document
+  (no `key`/`name`) can no longer remove a product from New Bill. Duplicate
+  legacy documents resolve to the canonical `product-<key>` record, then the
+  most recently updated one.
+- A rate save writes the complete configuration (`productRateFields`) and
+  then re-reads it (`verifyProductRates`). A failed or unconfirmed write shows an
+  error instead of a success toast, and `FirestoreDataService.set` now propagates
+  write errors instead of swallowing them.
+- `migrateProductConfigs` runs after `seedWorkspace`, is idempotent (stamped with
+  `configVersion`), never includes a valid saved `rate` in its patch, and never
+  re-enables a deliberately disabled product. A legacy "₹ per 16 sq.ft" rate is
+  folded into per-sq.ft (rate ÷ basis) so the money is unchanged.
+- Customers: `archived` + `archivedAt` keep invoices and payments intact.
+  `deleteCustomer` refuses when a bill or payment references the customer;
+  the UI offers Archive instead.

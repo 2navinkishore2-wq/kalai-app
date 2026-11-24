@@ -158,7 +158,11 @@ export function BillingPage() {
     };
   }, [items.length, savedId]);
 
-  const customers = useMemo(() => searchCustomers(app.customers, custSearch), [app.customers, custSearch]);
+  // Archived customers keep their history but must not be picked for a new bill.
+  const customers = useMemo(
+    () => searchCustomers(app.customers.filter((c) => c.archived !== true), custSearch),
+    [app.customers, custSearch]
+  );
   const productConfig = useMemo(() => app.products.find((p) => p.key === form.product), [app.products, form.product]);
 
   const pickCustomer = (c: Customer) => {
@@ -176,6 +180,11 @@ export function BillingPage() {
     const match = app.customers.find((c) => c.id === requested);
     if (!match) return;
     customerParamRef.current = requested;
+    if (match.archived === true) {
+      toast('This customer is archived. Restore it in Customers before billing.', 'warn');
+      navigate('/billing', { replace: true });
+      return;
+    }
     pickCustomer(match);
     navigate('/billing', { replace: true });
   }, [params, id, app.customers, navigate]);
@@ -521,13 +530,27 @@ export function BillingPage() {
           </Card>
 
           <Card title="2 · Product & calculation" subtitle="Rates come from Products & Rates. Nothing is hardcoded.">
+            {app.productConfigState === 'error' ? (
+              <SectionNote tone="warn">
+                Unable to load product rates from the cloud. Using the rates already saved on this device. Open Products &amp; Rates to retry.
+              </SectionNote>
+            ) : null}
             <div className="chip-row" style={{ marginBottom: 14 }}>
               {PRODUCT_KEYS.map((key) => {
                 const cfg = app.products.find((p) => p.key === key);
+                // Only an explicit disabled flag hides a product. A missing or
+                // unloaded configuration must never look like "off".
+                const unavailable = cfg?.active === false;
                 return (
-                  <button key={key} className={`chip${form.product === key ? ' active' : ''}`} onClick={() => switchProduct(key)} disabled={!cfg?.active}>
+                  <button
+                    key={key}
+                    className={`chip${form.product === key ? ' active' : ''}`}
+                    onClick={() => switchProduct(key)}
+                    disabled={unavailable}
+                    title={unavailable ? `${PRODUCT_NAMES[key].en} is disabled in Products & Rates` : undefined}
+                  >
                     {PRODUCT_NAMES[key][lang] || PRODUCT_NAMES[key].en}
-                    {!cfg?.active ? ' (off)' : ''}
+                    {unavailable ? ' (off)' : ''}
                   </button>
                 );
               })}

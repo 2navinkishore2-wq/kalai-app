@@ -17,6 +17,7 @@ import {
 } from 'lucide-react';
 import { useApp } from '../store/AppContext';
 import { UpdateStatusMessage, useUpdates } from '../store/UpdateContext';
+import { PRODUCT_CONFIG_VERSION } from '../lib/products';
 import type { BusinessSettings, DiscountType, Language, ThemeMode } from '../lib/types';
 import { addAudit } from '../services/audit';
 import { backupFileName, downloadBackup, exportBackup, importBackup, readBackupFile, type BackupFile } from '../services/backup';
@@ -625,10 +626,18 @@ function AboutUpdatesCard() {
   return (
     <>
       <Card title="KALAI DIGITAL" subtitle="Version details for this installation.">
-        <div className="kv"><span>Version</span><b>{version}</b></div>
+        <div className="kv"><span>Installed version</span><b>{version}</b></div>
         <div className="kv"><span>Platform</span><b>{platformLabel()}</b></div>
+        <div className="kv"><span>Package identity</span><b className="mono" style={{ fontSize: 11 }}>com.kalaidigital.billing</b></div>
         <div className="kv"><span>Build channel</span><b>Stable release</b></div>
+        <div className="kv"><span>Product settings</span><b>Automatic repair v{PRODUCT_CONFIG_VERSION}</b></div>
         <div className="kv"><span>Update feed</span><b className="mono" style={{ fontSize: 11, wordBreak: 'break-all' }}>{feedUrl()}</b></div>
+        <SectionNote tone="info">
+          The version above is read from the installed package itself, never from your Google account or cloud data. If the app still
+          shows a screen that a newer release removed (for example Inventory), the old build is still running: close KALAI DIGITAL completely,
+          then open it again from the current shortcut. On Windows, check that the shortcut points to the program in the existing installation
+          folder. Reinstalling never touches your bills, customers or rates.
+        </SectionNote>
         <SectionNote tone="info">
           The release feed returns only the newest stable version and its installers. No account data, bill or customer detail is ever sent when checking.
         </SectionNote>

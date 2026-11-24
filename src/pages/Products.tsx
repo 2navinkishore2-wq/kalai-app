@@ -3,6 +3,8 @@ import { Frame, IndianRupee, Pencil, Plus, Power, Save, Trash2, TriangleAlert } 
 import { useApp } from '../store/AppContext';
 import type { FrameSize, ProductConfig } from '../lib/types';
 import { PRODUCT_KEYS, SQFT_RATE_PRODUCTS, frameSeedId } from '../lib/constants';
+import { productRateFields } from '../lib/products';
+import { loadProductSettings, saveProductRates, verifyProductRates } from '../services/products';
 import { uid } from '../lib/ids';
 import { formatINR } from '../lib/format';
 import { addAudit } from '../services/audit';
@@ -262,56 +264,82 @@ function RateBook({ canEdit }: { canEdit: boolean }) {
   type RateDraft = { rate: string; active: boolean };
   const [draft, setDraft] = useState<Record<string, RateDraft>>({});
   const [error, setError] = useState('');
-  const [saving, setSaving] = useState(false);
   const [savedAt, setSavedAt] = useState('');
+  const [savedSummary, setSavedSummary] = useState('');
+  const [saving, setSaving] = useState(false);
 
+  // Seed the inputs once per product and keep anything the owner is typing.
+  // A background sync therefore never wipes an unsaved edit.
   useEffect(() => {
-    setDraft(
-      Object.fromEntries(sqftProducts.map((p) => [p.key, { rate: String(p.rate ?? 0), active: p.active !== false }]))
-    );
+    setDraft((current) => {
+      let changed = false;
+      const next = { ...current };
+      for (const p of sqftProducts) {
+        if (!next[p.key]) {
+          next[p.key] = { rate: String(p.rate ?? 0), active: p.active !== false };
+          changed = true;
+        }
+      }
+      return changed ? next : current;
+    });
   }, [sqftProducts]);
+
+  const draftFor = (product: ProductConfig): RateDraft =>
+    draft[product.key] || { rate: String(product.rate ?? 0), active: product.active !== false };
 
   const update = (key: string, patch: Partial<RateDraft>) => {
     setDraft((d) => ({
       ...d,
-      [key]: { rate: d[key]?.rate ?? '0', active: d[key]?.active ?? true, ...patch }
+      [key]: { ...(d[key] || { rate: '0', active: true }), ...patch }
     }));
     setSavedAt('');
+    setSavedSummary('');
+    setError('');
   };
 
   const save = async () => {
-    if (!canEdit) return setError('Only the owner can change rates.');
+    if (!canEdit) return setError('Only the owner account can change rates.');
     setError('');
     const rows = sqftProducts.map((p) => {
-      const d = draft[p.key] || { rate: String(p.rate ?? 0), active: p.active !== false };
-      return { product: p, rate: parseFloat(d.rate), active: d.active };
+      const d = draftFor(p);
+      const raw = d.rate.trim();
+      return { product: p, rate: raw === '' ? Number.NaN : Number(raw), active: d.active };
     });
     const invalid = rows.find((r) => !Number.isFinite(r.rate) || r.rate < 0);
-    if (invalid) return setError(`Enter a valid ₹/sq.ft rate for ${invalid.product.name}.`);
+    if (invalid) {
+      return setError(`Enter a valid ₹/sq.ft rate for ${invalid.product.name}. Nothing was saved.`);
+    }
 
     setSaving(true);
     try {
-      for (const row of rows) {
-        await app.service.set('productConfigs', row.product.id, {
-          pricingMode: 'sqft',
-          rate: row.rate,
-          basisSqft: 1,
-          minSqft: 0,
-          minChargeEnabled: false,
-          active: row.active
-        });
+      await saveProductRates(app.service, rows);
+      const problems = await verifyProductRates(app.service, rows);
+      if (problems.length > 0) {
+        setError(`The rates were sent but could not be confirmed (${problems.join('; ')}). Check the connection and save again.`);
+        return;
       }
-      const summary = rows.map((r) => `${r.product.name} ₹${r.rate}/sq.ft`).join(' · ');
+      // Reload from storage so the form and New Bill show the saved truth.
+      const reloaded = await loadProductSettings(app.service);
+      setDraft((current) => {
+        const next = { ...current };
+        for (const p of reloaded) {
+          if (p.key === 'FRAME') continue;
+          next[p.key] = { rate: String(p.rate), active: p.active !== false };
+        }
+        return next;
+      });
+      const summary = rows.map((r) => `${r.product.name} ₹${r.rate}/sq.ft${r.active ? '' : ' (disabled)'}`).join(' · ');
       await addAudit(app.service, app.user, {
         entity: 'product',
         entityId: 'rate-book',
         action: 'update',
         summary: `Flex/Sunpack/Vinyl/Star rates saved — ${summary}`
       });
-      toast(`Rates saved — ${summary}`, 'success');
+      setSavedSummary(summary);
       setSavedAt(new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
+      toast(`Rates saved — ${summary}`, 'success');
     } catch (e) {
-      setError((e as Error).message);
+      setError(`Could not save the rates: ${(e as Error).message}`);
     } finally {
       setSaving(false);
     }
@@ -320,36 +348,51 @@ function RateBook({ canEdit }: { canEdit: boolean }) {
   return (
     <Card
       title={<span><IndianRupee size={16} style={{ verticalAlign: -3, marginRight: 6 }} />Flex, Sunpack, Vinyl &amp; Star rates</span>}
-      subtitle="One editable ₹/sq.ft rate per product. These are the rates every new bill uses."
+      subtitle="One editable ₹/sq.ft rate per product. Saving a rate never changes whether a product is available."
     >
+      {app.productConfigState === 'error' ? (
+        <SectionNote tone="warn">
+          Unable to load product rates from the cloud. Showing the values already saved on this device. Retry when the connection returns — nothing is reset.
+        </SectionNote>
+      ) : null}
       <div className="grid grid-4">
-        {sqftProducts.map((p) => (
-          <div key={p.key} style={{ background: 'var(--surface-2)', border: '1px solid var(--border)', borderRadius: 10, padding: '10px 12px' }}>
-            <div style={{ fontWeight: 700, marginBottom: 8 }}>
-              {p.name} <span className="muted small" style={{ fontWeight: 500 }}>{p.nameTa}</span>
+        {sqftProducts.map((p) => {
+          const d = draftFor(p);
+          return (
+            <div key={p.key} style={{ background: 'var(--surface-2)', border: '1px solid var(--border)', borderRadius: 10, padding: '10px 12px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6, marginBottom: 8 }}>
+                <div style={{ fontWeight: 700 }}>
+                  {p.name} <span className="muted small" style={{ fontWeight: 500 }}>{p.nameTa}</span>
+                </div>
+                {d.active ? <Pill tone="green">Available</Pill> : <Pill tone="red">Disabled</Pill>}
+              </div>
+              <Field label="Rate (₹/sq.ft)" required>
+                <Input
+                  type="number"
+                  min={0}
+                  step="any"
+                  inputMode="decimal"
+                  placeholder="0"
+                  value={d.rate}
+                  disabled={!canEdit}
+                  onChange={(e) => update(p.key, { rate: e.target.value })}
+                />
+              </Field>
+              <label className="check" style={{ marginTop: 8 }}>
+                <input
+                  type="checkbox"
+                  checked={d.active}
+                  disabled={!canEdit}
+                  onChange={(e) => update(p.key, { active: e.target.checked })}
+                />
+                Available for billing
+              </label>
+              <div className="cell-sub" style={{ marginTop: 6 }}>
+                Saved: {formatINR(p.rate)}/sq.ft · {p.active === false ? 'disabled' : 'available'}
+              </div>
             </div>
-            <Field label="Rate (₹/sq.ft)" required>
-              <Input
-                type="number"
-                min={0}
-                step="any"
-                inputMode="decimal"
-                value={draft[p.key]?.rate ?? String(p.rate ?? 0)}
-                disabled={!canEdit}
-                onChange={(e) => update(p.key, { rate: e.target.value })}
-              />
-            </Field>
-            <label className="check" style={{ marginTop: 8 }}>
-              <input
-                type="checkbox"
-                checked={draft[p.key]?.active ?? p.active !== false}
-                disabled={!canEdit}
-                onChange={(e) => update(p.key, { active: e.target.checked })}
-              />
-              Available for billing
-            </label>
-          </div>
-        ))}
+          );
+        })}
       </div>
       <div className="row" style={{ marginTop: 12, gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
         <Button onClick={() => void save()} loading={saving} disabled={!canEdit}>
@@ -358,7 +401,9 @@ function RateBook({ canEdit }: { canEdit: boolean }) {
         <span className="muted small">Line total = width (ft) × height (ft) × ₹/sq.ft × quantity. No minimum area and no hidden basis.</span>
       </div>
       {savedAt ? (
-        <SectionNote tone="success">Rates saved at {savedAt} and stored in this account. New bills on Android and Windows use these saved values.</SectionNote>
+        <SectionNote tone="success">
+          Saved at {savedAt} — {savedSummary}. New bills on Android and Windows use these values immediately; products keep their availability.
+        </SectionNote>
       ) : null}
       {error ? <div className="form-error" style={{ marginTop: 8 }}>{error}</div> : null}
     </Card>
@@ -380,7 +425,7 @@ function ProductEditor({ product, canEdit }: { product: ProductConfig; canEdit: 
     if (!canEdit) return setError('Only the owner can change rates.');
     setSaving(true);
     try {
-      await app.service.set('productConfigs', product.id, { active });
+      await app.service.set('productConfigs', product.id, productRateFields(product, product.rate, active));
       await addAudit(app.service, app.user, {
         entity: 'product',
         entityId: product.id,

@@ -193,3 +193,11 @@ describe('frame beading options', () => {
     expect(normalizeBeading(undefined)).toBe('1 inch');
   });
 });
+
+describe('packaged application version', () => {
+  it('reports the version injected from the packaged build', () => {
+    expect(__APP_VERSION__).toMatch(/^\d+\.\d+\.\d+$/);
+    expect(appVersion()).toBe(__APP_VERSION__);
+    expect(appVersion()).not.toBe('0.0.0');
+  });
+});

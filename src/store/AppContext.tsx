@@ -17,7 +17,11 @@ import type { DataService } from '../services/data';
 import { createService, type DataMode, type ServiceBundle } from '../services/index';
 import { LocalDataService } from '../services/localService';
 import { normalizeSettings, seedWorkspace } from '../services/seed';
-import { DEFAULT_SETTINGS, FRAME_PRICE_SEED, PRODUCT_KEYS, frameSeedId, productSeed } from '../lib/constants';
+import { DEFAULT_SETTINGS, FRAME_PRICE_SEED, frameSeedId } from '../lib/constants';
+import { buildProductList } from '../lib/products';
+
+/** Why the New Bill product list looks the way it does. */
+export type ProductConfigState = 'loading' | 'ready' | 'defaults' | 'error';
 
 interface AppStore {
   service: DataService;
@@ -39,6 +43,7 @@ interface AppStore {
   stockTxns: StockTxn[];
   auditLogs: AuditLog[];
   products: ProductConfig[];
+  productConfigState: ProductConfigState;
   frames: FrameSize[];
   settings: BusinessSettings;
   signInGoogle: () => Promise<void>;
@@ -68,11 +73,6 @@ function useLive<T extends { id: string }>(svc: DataService, name: string): T[] 
     return svc.watch<T>(name, undefined, setItems);
   }, [svc, name, svc.basePath]);
   return items;
-}
-
-function fallbackProducts(): ProductConfig[] {
-  const now = new Date(0).toISOString();
-  return PRODUCT_KEYS.map((k) => productSeed(k, now));
 }
 
 function fallbackFrames(): FrameSize[] {
@@ -132,10 +132,16 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const frameDocs = useLive<FrameSize>(service, 'frameSizes');
   const settingsDocs = useLive<{ id: string } & Record<string, unknown>>(service, 'settings');
 
-  const products = useMemo(() => {
-    const fallback = fallbackProducts();
-    return fallback.map((seed) => productDocs.find((p) => p.id === seed.id || p.key === seed.key) || seed);
-  }, [productDocs]);
+  // Always five complete products. A partial/legacy Firestore document can no
+  // longer blank out a product's key (which made New Bill show "Flex (off)").
+  const products = useMemo(() => buildProductList(productDocs), [productDocs]);
+
+  const productConfigState = useMemo<ProductConfigState>(() => {
+    if (productDocs.length > 0) return 'ready';
+    if (seeding || authLoading) return 'loading';
+    if (syncStatus === 'error' || syncError) return 'error';
+    return 'defaults';
+  }, [productDocs.length, seeding, authLoading, syncStatus, syncError]);
 
   const frames = useMemo(() => {
     const list = frameDocs.length > 0 ? frameDocs : fallbackFrames();
@@ -261,6 +267,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       stockTxns,
       auditLogs,
       products,
+      productConfigState,
       frames,
       settings: settings.id ? settings : { ...DEFAULT_SETTINGS },
       signInGoogle,
@@ -288,6 +295,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       stockTxns,
       auditLogs,
       products,
+      productConfigState,
       frames,
       settings,
       signInGoogle,

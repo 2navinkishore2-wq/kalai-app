@@ -4,15 +4,15 @@ import {
   DEFAULT_SETTINGS,
   FRAME_PRICE_SEED,
   OPENING_RATES_VERSION,
-  OPENING_SQFT_RATES,
   PRODUCT_KEYS,
   frameSeedId,
   isSqftProduct,
   productSeed
 } from '../lib/constants';
-import { round2 } from '../lib/money';
+import { buildProductList, productKeyFromDoc, type RawProduct } from '../lib/products';
 import type { BusinessSettings, FrameSize, ProductConfig } from '../lib/types';
 import type { DataService } from './data';
+import { migrateProductConfigs } from './products';
 
 function iso(): string {
   return new Date().toISOString();
@@ -29,22 +29,30 @@ function iso(): string {
  * (rate ÷ basis) instead of being discarded, and a zero/unset rate receives the
  * shop's opening rate.
  */
-async function ensureProductConfigs(svc: DataService, products: ProductConfig[]): Promise<void> {
-  const byKey = new Map(products.map((p) => [p.key, p]));
+function stripUndefined(doc: Record<string, unknown>): Record<string, unknown> {
+  // Firestore rejects `undefined` field values, which used to make the Frame
+  // product document fail to create on a brand-new account.
+  return Object.fromEntries(Object.entries(doc).filter(([, value]) => value !== undefined));
+}
+
+async function ensureProductConfigs(svc: DataService, docs: RawProduct[]): Promise<void> {
+  const existingKeys = new Set(docs.map((doc) => productKeyFromDoc(doc)).filter(Boolean));
+  const normalized = buildProductList(docs);
+
   for (const key of PRODUCT_KEYS) {
-    const existing = byKey.get(key);
-    if (!existing) {
+    if (!existingKeys.has(key)) {
       const seed = productSeed(key, iso());
-      await svc.set('productConfigs', seed.id, seed as unknown as Record<string, unknown>);
+      await svc.set('productConfigs', seed.id, stripUndefined(seed as unknown as Record<string, unknown>));
       continue;
     }
+    const existing = normalized.find((p) => p.key === key);
+    if (!existing) continue;
     if (isSqftProduct(key) && existing.openingRatesVersion !== OPENING_RATES_VERSION) {
-      const oldBasis = Number(existing.basisSqft) > 0 ? Number(existing.basisSqft) : 1;
-      const oldRate = Number(existing.rate) > 0 ? Number(existing.rate) : 0;
-      const perSqft = oldBasis > 1 && oldRate > 0 ? round2(oldRate / oldBasis) : oldRate;
+      // normalisation already folded an old per-16-sq.ft rate into per sq.ft,
+      // so this keeps the owner's money identical instead of discarding it.
       const patch: Record<string, unknown> = {
         pricingMode: 'sqft',
-        rate: perSqft > 0 ? perSqft : OPENING_SQFT_RATES[key],
+        rate: existing.rate > 0 ? existing.rate : productSeed(key, iso()).rate,
         basisSqft: 1,
         openingRatesVersion: OPENING_RATES_VERSION
       };
@@ -93,8 +101,11 @@ export async function seedWorkspace(svc: DataService, email?: string | null): Pr
     });
   }
 
-  const products = await svc.query<ProductConfig>('productConfigs');
-  await ensureProductConfigs(svc, products);
+  const productDocs = (await svc.query<ProductConfig>('productConfigs')) as unknown as RawProduct[];
+  await ensureProductConfigs(svc, productDocs);
+  // Versioned, idempotent repair of older product records (missing activation
+  // flags, deprecated fields, partial writes). No-ops on a current workspace.
+  await migrateProductConfigs(svc);
 
   const frames = await svc.query<FrameSize>('frameSizes');
   if (frames.length === 0) {
