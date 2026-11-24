@@ -119,6 +119,30 @@ export function isNewerVersion(candidate: string, current: string): boolean {
   return compareVersions(candidate, current) > 0;
 }
 
+/** The Android versionCode compiled into this APK (0 elsewhere). */
+export function appVersionCode(): number {
+  try {
+    return typeof __APP_VERSION_CODE__ === 'number' ? __APP_VERSION_CODE__ : 0;
+  } catch {
+    return 0;
+  }
+}
+
+/**
+ * Is the published build newer than this one?
+ *
+ * A versionName alone is not enough on Android: 1.7.0 and the 1.7.0 hotfix
+ * both display "1.7.0" but carry versionCode 9 and 10. Android only upgrades
+ * on a higher versionCode, so an equal versionName with a higher code is a
+ * real, installable update.
+ */
+export function isNewerBuild(release: ReleaseInfo, currentVersion: string, currentVersionCode = appVersionCode()): boolean {
+  const byVersion = compareVersions(release.version, currentVersion);
+  if (byVersion !== 0) return byVersion > 0;
+  if (!currentVersionCode || typeof release.versionCode !== 'number') return false;
+  return release.versionCode > currentVersionCode;
+}
+
 function asAsset(input: unknown): ReleaseAsset | null {
   if (!input || typeof input !== 'object') return null;
   const raw = input as Record<string, unknown>;
@@ -184,6 +208,8 @@ export function assetForPlatform(release: ReleaseInfo | undefined, platform: Upd
 
 interface CheckOptions {
   currentVersion?: string;
+  /** This build's Android versionCode (defaults to the compiled value). */
+  currentVersionCode?: number;
   feedUrl?: string;
   /** Extra feed URLs tried in order when the first one fails. */
   fallbackUrls?: string[];
@@ -260,7 +286,7 @@ export async function checkForUpdates(options: CheckOptions = {}): Promise<Updat
         continue;
       }
       const checkedAt = new Date().toISOString();
-      if (isNewerVersion(release.version, currentVersion)) {
+      if (isNewerBuild(release, currentVersion, options.currentVersionCode)) {
         return { status: 'available', currentVersion, release, checkedAt };
       }
       return { status: 'current', currentVersion, release, checkedAt };

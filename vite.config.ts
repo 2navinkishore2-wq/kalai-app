@@ -1,12 +1,28 @@
 import { defineConfig } from 'vitest/config';
 import react from '@vitejs/plugin-react';
 import { VitePWA } from 'vite-plugin-pwa';
+import { readFileSync } from 'node:fs';
 import pkg from './package.json';
+
+/**
+ * versionCode from android/app/build.gradle. Two builds can share a
+ * versionName (1.7.0 and its hotfix), so the update check needs the code to
+ * tell them apart on Android.
+ */
+function androidVersionCode(): number {
+  try {
+    const gradle = readFileSync(new URL('./android/app/build.gradle', import.meta.url), 'utf8');
+    return Number((/versionCode\s+(\d+)/.exec(gradle) || [])[1] || 0);
+  } catch {
+    return 0;
+  }
+}
 
 export default defineConfig({
   base: './',
   define: {
     __APP_VERSION__: JSON.stringify(pkg.version),
+    __APP_VERSION_CODE__: JSON.stringify(androidVersionCode()),
     // SHA-1 of the certificate used to sign the Android APK. Shown in
     // Settings so the owner can register it in the Firebase console for
     // Google Sign-In. Public information; injected at build time.

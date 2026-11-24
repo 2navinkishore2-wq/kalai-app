@@ -7,6 +7,7 @@ import {
   assetForPlatform,
   checkForUpdates,
   compareVersions,
+  isNewerBuild,
   isNewerVersion,
   normalizeVersion,
   parseRelease,
@@ -199,5 +200,48 @@ describe('packaged application version', () => {
     expect(__APP_VERSION__).toMatch(/^\d+\.\d+\.\d+$/);
     expect(appVersion()).toBe(__APP_VERSION__);
     expect(appVersion()).not.toBe('0.0.0');
+  });
+});
+
+describe('hotfix detection (same versionName, higher versionCode)', () => {
+  const release = (version: string, versionCode?: number): ReleaseInfo => ({
+    version,
+    versionCode,
+    notes: '',
+    assets: { android: { url: 'https://example.test/app.apk' } }
+  });
+
+  it('treats a higher versionCode with an equal versionName as an update', () => {
+    expect(isNewerBuild(release('1.7.0', 10), '1.7.0', 9)).toBe(true);
+  });
+
+  it('does not offer the same build again', () => {
+    expect(isNewerBuild(release('1.7.0', 10), '1.7.0', 10)).toBe(false);
+  });
+
+  it('never downgrades to a lower versionCode', () => {
+    expect(isNewerBuild(release('1.7.0', 9), '1.7.0', 10)).toBe(false);
+  });
+
+  it('keeps Windows/web on versionName comparison only', () => {
+    expect(isNewerBuild(release('1.7.0', 99), '1.7.0', 0)).toBe(false);
+    expect(isNewerBuild(release('1.8.0', 11), '1.7.0', 0)).toBe(true);
+  });
+
+  it('is used by the feed check', async () => {
+    const payload = {
+      version: '1.7.0',
+      versionCode: 10,
+      notes: 'hotfix',
+      assets: { android: { url: 'https://example.test/KALAI-DIGITAL-1.7.0-hotfix1.apk' } }
+    };
+    const fetchImpl = (async () => ({ ok: true, status: 200, json: async () => payload })) as unknown as typeof fetch;
+
+    const result = await checkForUpdates({ currentVersion: '1.7.0', currentVersionCode: 9, feedUrl: 'https://example.test/feed.json', fetchImpl });
+    expect(result.status).toBe('available');
+    expect(result.release?.versionCode).toBe(10);
+
+    const same = await checkForUpdates({ currentVersion: '1.7.0', currentVersionCode: 10, feedUrl: 'https://example.test/feed.json', fetchImpl });
+    expect(same.status).toBe('current');
   });
 });

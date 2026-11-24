@@ -42,7 +42,7 @@ import type { AuthUser, SyncStatus } from '../lib/types';
 import { formatBillNumber, parseBillSequence } from '../lib/invoiceNumber';
 import type { DataService, QuerySpec } from './data';
 import { isNative } from '../lib/platform';
-import { signInWithNativeGoogle, signOutNativeGoogle, isNativeGoogleConfigured } from '../lib/nativeGoogle';
+import { diag, signInWithNativeGoogle, signOutNativeGoogle, isNativeGoogleConfigured } from '../lib/nativeGoogle';
 
 export interface FirebaseConfig {
   apiKey: string;
@@ -252,15 +252,35 @@ export class FirestoreDataService implements DataService {
           'Android Google sign-in is not configured in this build. Add VITE_GOOGLE_WEB_CLIENT_ID to .env and rebuild the APK.'
         );
       }
+      // The native step has its own bound (and never opens a second chooser).
       const { idToken } = await signInWithNativeGoogle();
       const cred = GoogleAuthProvider.credential(idToken);
+      diag('firebase-exchange-pending');
+      // Bounded too: a stalled Firebase call must surface as an error, never as
+      // a spinner that never ends.
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const timeout = new Promise<never>((_, reject) => {
+        timer = setTimeout(
+          () =>
+            reject(
+              new Error(
+                'Firebase did not answer in time. Your saved bills are untouched — check the internet connection and try again.'
+              )
+            ),
+          45_000
+        );
+      });
       try {
-        const result = await signInWithCredential(auth, cred);
+        const result = await Promise.race([signInWithCredential(auth, cred), timeout]);
+        diag('firebase-exchange-done');
         return this.toAuthUser(result.user);
       } catch (error) {
         // The Google account already signed in; only the Firebase exchange
         // failed. Say which one it was instead of blaming the account picker.
+        diag('firebase-exchange-failed');
         throw new Error(firebaseCredentialMessage(error));
+      } finally {
+        if (timer) clearTimeout(timer);
       }
     }
     const cred = await signInWithPopup(auth, provider);

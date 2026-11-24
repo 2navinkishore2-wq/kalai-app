@@ -1,21 +1,35 @@
 /**
- * Native Android Google Sign-In bridge.
+ * Native Android Google Sign-In bridge (v1.7.0 hotfix 1).
  *
  * Web/Windows use the Firebase JS SDK popup. Inside the Capacitor Android
  * WebView the popup flow is unreliable, so Android obtains a Google ID token
- * natively and exchanges it with the same Firebase JS SDK. Firebase federates
- * by Google account, so the resulting UID is identical across platforms.
+ * natively (`KalaiGoogleSignInPlugin`, AndroidX Credential Manager) and
+ * exchanges it with the same Firebase JS SDK. Firebase federates by Google
+ * account, so the resulting UID is identical across platforms.
+ *
+ * WHY THE PLUGIN CHANGED
+ * `@capgo/capacitor-social-login` 6.0.1 hangs on Android: after the account is
+ * chosen it also asks Identity.getAuthorizationClient() for an access token,
+ * starts an intent sender with its own request codes, and waits on a future
+ * with no timeout. Its handleOnActivityResult() only forwards Facebook results
+ * and Capacitor's Bridge only routes request codes declared on the plugin, so
+ * that result is never delivered. The plugin promise then never settles — the
+ * button spins forever with no account picker and no error. The app now uses
+ * its own plugin that returns only the ID token, which is all Firebase needs.
+ *
+ * EVERY NATIVE CALL IS BOUNDED
+ * A rejected or never-answered native call must never leave the UI spinning.
+ * Each awaited step has a timeout, only one attempt can run at a time, and a
+ * timed-out attempt is discarded (its native selection is cleared) so a late
+ * answer can never sign the user in unexpectedly.
  *
  * ERROR [16] "Account reauth failed"
- * This code comes from Google's Credential Manager while it is handing back an
- * account, i.e. BEFORE an ID token exists and long before Firebase is involved.
- * `@capgo/capacitor-social-login` 6.0.1 does not retry it and has no
- * `skipAuthOnlyAuthorizationAfterSignIn` option (that arrived in later plugin
- * majors), so the app performs exactly ONE bounded recovery itself: clear the
- * cached native selection, then ask again with authorized-account filtering
- * disabled. If that second attempt also fails we stop, explain the likeliest
- * configuration cause, and never loop.
+ * Google's Credential Manager refuses the cached account selection. The app
+ * performs exactly ONE bounded recovery: clear the cached credential state
+ * (fire-and-forget, never blocking) and ask once more with the standard
+ * account chooser. If that also fails the user gets an explanation, not a loop.
  */
+import { registerPlugin } from '@capacitor/core';
 import { isNative } from './platform';
 
 export type NativeGoogleErrorCode =
@@ -27,6 +41,7 @@ export type NativeGoogleErrorCode =
   | 'REAUTH_REQUIRED'
   | 'NETWORK'
   | 'NO_ID_TOKEN'
+  | 'TIMEOUT'
   | 'FAILED';
 
 export function nativeWebClientId(): string {
@@ -56,40 +71,59 @@ export interface NativeGoogleUser {
   name?: string | null;
 }
 
-/** The subset of the plugin the app actually uses (mockable in tests). */
-export interface NativeSocialLoginBridge {
-  initialize(options: { google: { webClientId: string } }): Promise<unknown>;
-  login(options: {
-    provider: 'google';
-    options: Record<string, unknown>;
-  }): Promise<{
-    provider: string;
-    result?: {
-      responseType?: string;
-      idToken?: string | null;
-      profile?: { email?: string | null; name?: string | null } | null;
-    };
-  }>;
-  logout(options: { provider: 'google' }): Promise<unknown>;
+/** The native plugin surface used by the app (mockable in tests). */
+export interface NativeGoogleBridge {
+  signIn(options: { webClientId: string }): Promise<{ idToken?: string | null; email?: string | null; name?: string | null }>;
+  clearCredentialState(): Promise<unknown>;
 }
+
+/**
+ * Registers the Capacitor plugin declared in
+ * `android/app/src/main/java/com/kalaidigital/billing/KalaiGoogleSignInPlugin.java`.
+ * `registerPlugin` is public Capacitor API; calling it on the web is harmless
+ * because every entry point here is guarded by `isNative()`.
+ */
+const nativeGoogleBridge = registerPlugin<NativeGoogleBridge>('KalaiGoogleSignIn');
 
 export interface NativeGoogleDeps {
   isNative(): boolean;
   webClientId(): string;
-  loadBridge(): Promise<NativeSocialLoginBridge>;
+  loadBridge(): Promise<NativeGoogleBridge>;
+  /** How long the account chooser may stay open before the attempt is abandoned. */
+  signInTimeoutMs?: number;
+  /** Bound for clearing the cached Google selection; never blocks the retry. */
+  clearTimeoutMs?: number;
 }
+
+const DEFAULT_SIGN_IN_TIMEOUT_MS = 90_000;
+const DEFAULT_CLEAR_TIMEOUT_MS = 6_000;
 
 const defaultDeps: NativeGoogleDeps = {
   isNative,
   webClientId: nativeWebClientId,
-  loadBridge: async () => {
-    const { SocialLogin } = await import('@capgo/capacitor-social-login');
-    return SocialLogin as unknown as NativeSocialLoginBridge;
-  }
+  loadBridge: async () => nativeGoogleBridge
 };
+
+/**
+ * Sanitized stage logging: stage names only, never tokens, emails or IDs.
+ * Visible in `adb logcat` (Capacitor forwards console output) and DevTools.
+ */
+export function diag(stage: string, detail?: string): void {
+  try {
+    console.info(`[google-signin] ${stage}${detail ? `: ${detail}` : ''}`);
+  } catch {
+    /* logging must never break sign-in */
+  }
+}
 
 const CONFIG_MESSAGE =
   'This APK’s Google sign-in configuration does not match the installed build. In Firebase → Project settings → Your apps, the Android app for package com.kalaidigital.billing must include this APK’s SHA-1 fingerprint, and the Web client ID must come from the same Firebase project.';
+
+const RETRY_MESSAGE =
+  'Google still refuses this account after one retry. Check that the OAuth consent screen is External, that this Google account is listed under Audience → Test users (or the app is published), and that the APK’s SHA-1 is registered in Firebase → Project settings → Your apps.';
+
+const TIMEOUT_MESSAGE =
+  'Google did not answer in time, so the sign-in attempt was cancelled. Check the internet connection and that Google Play services is installed and updated, then tap Try again.';
 
 /**
  * Maps a raw plugin/Google message to a stable code and a user-readable
@@ -110,13 +144,17 @@ export function classifyNativeGoogleFailure(rawMessage: string): {
     };
   }
 
-  if (/cancel|user_cancelled|12501|activity\s*result/i.test(msg)) {
+  if (/timeout|timed\s*out|did\s*not\s*answer/i.test(msg)) {
+    return { code: 'TIMEOUT', message: TIMEOUT_MESSAGE };
+  }
+
+  if (/cancel|user_cancelled|canceled|12501|activity\s*result/i.test(msg)) {
     return { code: 'CANCELLED', message: 'Google sign-in was cancelled.' };
   }
 
   // Credential Manager rejects an app whose package/certificate is not
   // registered on the Android OAuth client (Google surfaces this as 10).
-  if (/developer_error|apiexception:\s*10\b|28444|signature|sha-?1|certificate/i.test(msg)) {
+  if (/developer_error|developer\s*console|apiexception:\s*10\b|28444|signature|sha-?1|certificate|not\s*set\s*up\s*correctly/i.test(msg)) {
     return { code: 'DEVELOPER_ERROR', message: CONFIG_MESSAGE };
   }
 
@@ -136,7 +174,7 @@ export function classifyNativeGoogleFailure(rawMessage: string): {
     };
   }
 
-  if (/network|timeout|timed\s*out|unreachable|offline|enotfound|unavailable/i.test(msg)) {
+  if (/network|unreachable|offline|enotfound|unavailable/i.test(msg)) {
     return {
       code: 'NETWORK',
       message: 'Google could not be reached. Check the internet connection and try again.'
@@ -146,105 +184,191 @@ export function classifyNativeGoogleFailure(rawMessage: string): {
   return { code: 'FAILED', message: `Native Google sign-in failed: ${msg}` };
 }
 
-function isRecoverable(code: NativeGoogleErrorCode): boolean {
-  return code === 'REAUTH_REQUIRED';
+/** Reads the "CODE: message" prefix the native plugin sends. */
+export function nativeCodeOf(rawMessage: string): NativeGoogleErrorCode | null {
+  const prefix = /^\s*(NOT_CONFIGURED|CANCELLED|NO_CREDENTIAL|PLAY_SERVICES|CONFIG|REAUTH|NETWORK|NO_ID_TOKEN|FAILED)\s*:/i.exec(
+    String(rawMessage || '')
+  );
+  if (!prefix) return null;
+  const value = prefix[1].toUpperCase();
+  if (value === 'CONFIG') return 'DEVELOPER_ERROR';
+  if (value === 'REAUTH') return 'REAUTH_REQUIRED';
+  return value as NativeGoogleErrorCode;
+}
+
+function messageOf(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+/** Turns anything thrown by the native layer into a stable, explained error. */
+function toSignInError(error: unknown, retried = false): NativeGoogleSignInError {
+  if (error instanceof NativeGoogleSignInError) {
+    return error.retried === retried ? error : new NativeGoogleSignInError(error.message, error.code, retried);
+  }
+  const raw = messageOf(error);
+  const byPrefix = nativeCodeOf(raw);
+  const byText = classifyNativeGoogleFailure(raw);
+  const code = byPrefix ?? byText.code;
+  if (code === 'REAUTH_REQUIRED') {
+    return new NativeGoogleSignInError(retried ? RETRY_MESSAGE : byText.message, code, retried);
+  }
+  const text = byPrefix ? raw.replace(/^\s*[A-Z_]+\s*:\s*/, '') : byText.message;
+  return new NativeGoogleSignInError(code === 'FAILED' ? `Native Google sign-in failed: ${text}` : byText.message, code, retried);
 }
 
 /**
- * One sign-in attempt. The recovery attempt deliberately disables
- * authorized-account filtering: Google's own guidance for [16] is that the
- * cached account-selection state, or a filter, is what fails, while a plain
- * account chooser usually succeeds.
+ * Rejects when `work` has not settled within `ms`, and refuses to attach any
+ * later result: the caller has already moved on, so a late native answer can
+ * never complete a sign-in the user is no longer waiting for.
  */
-async function attempt(
-  bridge: NativeSocialLoginBridge,
-  options: Record<string, unknown>
-): Promise<NativeGoogleUser> {
-  const res = await bridge.login({ provider: 'google', options });
-  if (res.provider !== 'google' || res.result?.responseType !== 'online') {
-    throw new NativeGoogleSignInError('Native Google sign-in did not return an online credential.', 'NO_ID_TOKEN');
-  }
-  if (!res.result.idToken) {
+export function withTimeout<T>(work: Promise<T>, ms: number, message = TIMEOUT_MESSAGE): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    let settled = false;
+    const timer = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      reject(new NativeGoogleSignInError(message, 'TIMEOUT'));
+    }, Math.max(0, ms));
+    work.then(
+      (value) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (error) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        reject(error);
+      }
+    );
+  });
+}
+
+async function oneAttempt(bridge: NativeGoogleBridge, webClientId: string, timeoutMs: number): Promise<NativeGoogleUser> {
+  diag('chooser-requested');
+  const result = await withTimeout(bridge.signIn({ webClientId }), timeoutMs);
+  if (!result || !result.idToken) {
     throw new NativeGoogleSignInError('Native Google sign-in returned no ID token.', 'NO_ID_TOKEN');
   }
-  // Never log or include the token in an error path.
+  diag('id-token-received');
   return {
-    idToken: res.result.idToken,
-    email: res.result.profile?.email ?? null,
-    name: res.result.profile?.name ?? null
+    idToken: result.idToken,
+    email: result.email ?? null,
+    name: result.name ?? null
   };
 }
 
-async function clearCachedSession(bridge: NativeSocialLoginBridge): Promise<void> {
-  try {
-    await bridge.logout({ provider: 'google' });
-  } catch {
-    // Best effort only: the retry is still worth attempting.
-  }
+/**
+ * Best effort, always bounded, never awaited for correctness: an unresponsive
+ * Play services must not be able to block the retry or the error message.
+ */
+function clearSelection(bridge: NativeGoogleBridge, timeoutMs: number): Promise<void> {
+  diag('clearing-cached-selection');
+  return withTimeout(
+    Promise.resolve()
+      .then(() => bridge.clearCredentialState())
+      .then(() => undefined),
+    timeoutMs,
+    'Clearing the cached Google selection timed out.'
+  ).catch((error) => {
+    diag('clear-selection-failed', messageOf(error).slice(0, 80));
+  });
 }
 
-export async function signInWithNativeGoogle(
-  deps: NativeGoogleDeps = defaultDeps
-): Promise<NativeGoogleUser> {
-  const webClientId = deps.webClientId();
+let inFlight: Promise<NativeGoogleUser> | null = null;
+
+async function runSignIn(deps: NativeGoogleDeps): Promise<NativeGoogleUser> {
+  const signInTimeoutMs = deps.signInTimeoutMs ?? DEFAULT_SIGN_IN_TIMEOUT_MS;
+  const clearTimeoutMs = deps.clearTimeoutMs ?? DEFAULT_CLEAR_TIMEOUT_MS;
+
   if (!deps.isNative()) {
     throw new NativeGoogleSignInError('Native Google sign-in is only available on Android.', 'NOT_CONFIGURED');
   }
+  const webClientId = deps.webClientId();
   if (!webClientId) {
     throw new NativeGoogleSignInError(
       'VITE_GOOGLE_WEB_CLIENT_ID is not set. Add the Firebase project Web OAuth client ID to enable native Google sign-in.',
       'NOT_CONFIGURED'
     );
   }
+  diag('native-detected');
 
-  let bridge: NativeSocialLoginBridge;
+  let bridge: NativeGoogleBridge;
   try {
-    bridge = await deps.loadBridge();
-    await bridge.initialize({ google: { webClientId } });
-  } catch (e) {
-    const raw = e instanceof Error ? e.message : String(e);
-    const classified = classifyNativeGoogleFailure(raw);
-    throw new NativeGoogleSignInError(classified.message, classified.code);
+    bridge = await withTimeout(Promise.resolve(deps.loadBridge()), 10_000, 'The Google sign-in module did not load.');
+  } catch (error) {
+    // A missing/old native side reads as "not implemented" from Capacitor.
+    const e = /not implemented|unimplemented/i.test(messageOf(error))
+      ? new NativeGoogleSignInError(
+          'This APK does not contain the native Google sign-in plugin. Install the latest KALAI DIGITAL build.',
+          'NOT_CONFIGURED'
+        )
+      : toSignInError(error);
+    diag('bridge-failed', e.code);
+    throw e;
   }
 
   try {
-    return await attempt(bridge, {});
+    const user = await oneAttempt(bridge, webClientId, signInTimeoutMs);
+    diag('signed-in');
+    return user;
   } catch (firstError) {
-    const raw = firstError instanceof Error ? firstError.message : String(firstError);
-    const classified =
-      firstError instanceof NativeGoogleSignInError && firstError.code !== 'FAILED'
-        ? { code: firstError.code, message: firstError.message }
-        : classifyNativeGoogleFailure(raw);
+    const first = toSignInError(firstError);
+    diag('attempt-failed', first.code);
 
-    if (!isRecoverable(classified.code)) {
-      throw new NativeGoogleSignInError(classified.message, classified.code);
+    if (first.code === 'TIMEOUT') {
+      // Discard whatever the chooser may still return.
+      void clearSelection(bridge, clearTimeoutMs);
+      throw first;
+    }
+    if (first.code !== 'REAUTH_REQUIRED') {
+      throw first;
     }
 
-    // Exactly one recovery: clear the stale Credential Manager selection, then
-    // ask again without authorized-account filtering.
-    await clearCachedSession(bridge);
+    diag('recovering-after-reauth');
+    await clearSelection(bridge, clearTimeoutMs);
     try {
-      return await attempt(bridge, { filterByAuthorizedAccounts: false, forcePrompt: true });
+      const user = await oneAttempt(bridge, webClientId, signInTimeoutMs);
+      diag('signed-in-after-recovery');
+      return user;
     } catch (secondError) {
-      const secondRaw = secondError instanceof Error ? secondError.message : String(secondError);
-      const second = classifyNativeGoogleFailure(secondRaw);
-      const code: NativeGoogleErrorCode = second.code === 'FAILED' ? 'REAUTH_REQUIRED' : second.code;
-      throw new NativeGoogleSignInError(
-        code === 'REAUTH_REQUIRED'
-          ? 'Google still refuses this account after one retry. Check that the OAuth consent screen is External, that this Google account is listed under Audience → Test users (or the app is published), and that the APK’s SHA-1 is registered in Firebase → Project settings → Your apps.'
-          : second.message,
-        code,
-        true
-      );
+      const second = toSignInError(secondError, true);
+      diag('recovery-failed', second.code);
+      if (second.code === 'TIMEOUT') void clearSelection(bridge, clearTimeoutMs);
+      throw second.code === 'REAUTH_REQUIRED' || second.code === 'FAILED'
+        ? new NativeGoogleSignInError(RETRY_MESSAGE, 'REAUTH_REQUIRED', true)
+        : second;
     }
   }
+}
+
+/**
+ * One sign-in attempt at a time: a second tap while the chooser is open gets
+ * the SAME promise instead of opening a second account chooser.
+ */
+export function signInWithNativeGoogle(deps: NativeGoogleDeps = defaultDeps): Promise<NativeGoogleUser> {
+  if (inFlight) {
+    diag('already-in-progress');
+    return inFlight;
+  }
+  const run = runSignIn(deps).finally(() => {
+    if (inFlight === run) inFlight = null;
+  });
+  inFlight = run;
+  return run;
+}
+
+/** Test-only: forget any in-flight attempt. */
+export function resetNativeGoogleForTests(): void {
+  inFlight = null;
 }
 
 export async function signOutNativeGoogle(): Promise<void> {
   if (!isNative()) return;
   try {
-    const { SocialLogin } = await import('@capgo/capacitor-social-login');
-    await SocialLogin.logout({ provider: 'google' });
+    await clearSelection(nativeGoogleBridge, DEFAULT_CLEAR_TIMEOUT_MS);
   } catch {
     // Firebase sign-out is the source of truth.
   }

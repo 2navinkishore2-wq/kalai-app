@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useApp } from '../store/AppContext';
 import { Button, Field, Input } from '../components/ui';
 import { logoSrc } from '../lib/logo';
@@ -26,10 +26,26 @@ export function LoginPage() {
   const [error, setError] = useState('');
   const [demoName, setDemoName] = useState('');
   const [showDemo, setShowDemo] = useState(false);
+  // Last-resort watchdog: the native flow is already bounded, but the button
+  // must never be able to spin forever for any reason.
+  const watchdog = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(
+    () => () => {
+      if (watchdog.current) clearTimeout(watchdog.current);
+    },
+    []
+  );
 
   const google = async () => {
+    if (busy) return;
     setError('');
     setBusy(true);
+    if (watchdog.current) clearTimeout(watchdog.current);
+    watchdog.current = setTimeout(() => {
+      setBusy(false);
+      setError('Google sign-in took too long, so it was cancelled. Check the internet connection and tap Try again.');
+    }, 120_000);
     try {
       await signInGoogle();
     } catch (e) {
@@ -45,6 +61,10 @@ export function LoginPage() {
       else if (/VITE_GOOGLE_WEB_CLIENT_ID/.test(msg)) setError(msg);
       else setError(msg);
     } finally {
+      if (watchdog.current) {
+        clearTimeout(watchdog.current);
+        watchdog.current = null;
+      }
       setBusy(false);
     }
   };
@@ -80,7 +100,10 @@ export function LoginPage() {
 
         {error ? (
           <div className="section-note note-danger" style={{ marginTop: 14, textAlign: 'left' }}>
-            {error}
+            <div>{error}</div>
+            <Button size="sm" variant="ghost" style={{ marginTop: 8 }} onClick={() => void google()} disabled={busy}>
+              Try again
+            </Button>
           </div>
         ) : null}
 
