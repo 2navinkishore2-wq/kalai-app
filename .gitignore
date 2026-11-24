@@ -27,3 +27,7 @@ android/keystore.properties
 # Local build logs and emulator screenshots (not source)
 /*.png
 *-out.txt
+
+# Local build toolchain (JDK / Android SDK downloaded for offline builds)
+.tools/
+.cloud-attachments/

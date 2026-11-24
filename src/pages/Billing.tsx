@@ -3,7 +3,7 @@ import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { Plus, Trash2, Pencil, Save, Search, UserPlus, RotateCcw, Printer, Share2, FilePlus2, AlertTriangle, Info } from 'lucide-react';
 import { useApp } from '../store/AppContext';
 import type { Bill, BillItem, BillPayment, Customer, PaymentMethod, ProductKey } from '../lib/types';
-import { PAYMENT_METHODS, PRODUCT_KEYS, PRODUCT_NAMES, FRAME_BEADINGS, isClothProduct, normalizeBeading } from '../lib/constants';
+import { PAYMENT_METHODS, PRODUCT_KEYS, PRODUCT_NAMES, FRAME_BEADINGS, isSqftProduct, normalizeBeading } from '../lib/constants';
 import { billStatus, computeBillTotals, computeFrame, computeSqft } from '../lib/pricing';
 import { formatINR, formatDate, isValidPhone, todayISO } from '../lib/format';
 import { round2, sum } from '../lib/money';
@@ -29,9 +29,9 @@ interface ItemForm {
 
 const DEFAULT_BEADING = FRAME_BEADINGS[0].value;
 
-/** Flex, Vinyl and Star are entered in feet; Frame and Sunpack keep inches. */
+/** Flex, Sunpack, Vinyl and Star are entered in feet; Frame uses inches. */
 function defaultUnit(product: ProductKey): Unit {
-  return isClothProduct(product) ? 'ft' : 'in';
+  return isSqftProduct(product) ? 'ft' : 'in';
 }
 
 const emptyForm = (product: ProductKey, frameSizeId = ''): ItemForm => ({

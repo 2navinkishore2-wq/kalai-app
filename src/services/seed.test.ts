@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import { LocalDataService } from './localService';
 import { seedWorkspace } from './seed';
 import { createBill } from './bills';
-import { DEFAULT_SETTINGS, FRAME_BEADINGS, OPENING_SQFT_RATES } from '../lib/constants';
+import { DEFAULT_SETTINGS, FRAME_BEADINGS, OPENING_RATES_VERSION, OPENING_SQFT_RATES } from '../lib/constants';
 import type { AuthUser, Bill, BillItem, ProductConfig } from '../lib/types';
 
 const user: AuthUser = { uid: 'owner-1', name: 'Owner', email: 'owner@kalai.test', photoURL: null, isDemo: true };
@@ -14,7 +14,7 @@ async function product(svc: LocalDataService, key: string): Promise<ProductConfi
   return found;
 }
 
-describe('opening Flex / Vinyl / Star rates', () => {
+describe('opening Flex / Sunpack / Vinyl / Star rates', () => {
   let svc: LocalDataService;
 
   beforeEach(() => {
@@ -25,17 +25,20 @@ describe('opening Flex / Vinyl / Star rates', () => {
   it('seeds the shop opening rates per square foot', async () => {
     await seedWorkspace(svc, 'owner@kalai.test');
 
-    for (const key of ['FLEX', 'VINYL', 'STAR'] as const) {
+    for (const key of ['FLEX', 'SUNPACK', 'VINYL', 'STAR'] as const) {
       const p = await product(svc, key);
       expect(p.rate).toBe(OPENING_SQFT_RATES[key]);
       expect(p.basisSqft).toBe(1);
       expect(p.pricingMode).toBe('sqft');
-      expect(p.openingRatesVersion).toBe(1);
+      expect(p.openingRatesVersion).toBe(OPENING_RATES_VERSION);
     }
 
+    // Sunpack uses the same simple area × ₹/sq.ft × qty model as Flex.
     const sunpack = await product(svc, 'SUNPACK');
-    expect(sunpack.rate).toBe(0);
-    expect(sunpack.basisSqft).toBe(16);
+    expect(sunpack.rate).toBe(16);
+    expect(sunpack.basisSqft).toBe(1);
+    expect(sunpack.minSqft).toBe(0);
+    expect(sunpack.minChargeEnabled).toBe(false);
 
     const frame = await product(svc, 'FRAME');
     expect(frame.pricingMode).toBe('fixed');
@@ -62,9 +65,11 @@ describe('opening Flex / Vinyl / Star rates', () => {
 
     await seedWorkspace(svc);
     const migrated = await product(svc, 'FLEX');
-    expect(migrated.rate).toBe(16);
+    // ₹12 per 16 sq.ft is the same price as ₹0.75 per sq.ft, so the legacy
+    // rate is converted instead of being thrown away.
+    expect(migrated.rate).toBe(0.75);
     expect(migrated.basisSqft).toBe(1);
-    expect(migrated.openingRatesVersion).toBe(1);
+    expect(migrated.openingRatesVersion).toBe(OPENING_RATES_VERSION);
 
     // An owner edit after the migration survives later launches.
     await svc.set('productConfigs', migrated.id, { rate: 20 });

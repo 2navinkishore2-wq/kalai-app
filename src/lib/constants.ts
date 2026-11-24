@@ -1,4 +1,4 @@
-import type { BusinessSettings, ExpenseCategory, PaymentMethod, ProductConfig, ProductKey } from './types';
+import type { BusinessSettings, ExpenseCategory, PaymentDetails, PaymentMethod, ProductConfig, ProductKey } from './types';
 
 export const APP_NAME = 'KALAI DIGITAL';
 export const APP_NAME_TA = 'கலை டிஜிட்டல்';
@@ -29,26 +29,32 @@ export const EXPENSE_CATEGORIES: ExpenseCategory[] = [
 ];
 
 /**
- * Flex, Vinyl and Star are billed per square foot, in feet on the entry form.
+ * Flex, Sunpack, Vinyl and Star are billed with one simple square-feet model:
+ * Area = width (ft) × height (ft), Amount = Area × ₹/sq.ft × Quantity.
  * These are the shop's opening rates for this release. The one-time migration
  * in seedWorkspace applies them once; later edits in Products & Rates win.
  */
-export const SQFT_RATE_PRODUCTS: ProductKey[] = ['FLEX', 'VINYL', 'STAR'];
+export const SQFT_RATE_PRODUCTS: ProductKey[] = ['FLEX', 'SUNPACK', 'VINYL', 'STAR'];
 
-export const OPENING_SQFT_RATES: Record<'FLEX' | 'VINYL' | 'STAR', number> = {
+export const OPENING_SQFT_RATES: Record<'FLEX' | 'SUNPACK' | 'VINYL' | 'STAR', number> = {
   FLEX: 16,
+  SUNPACK: 16,
   VINYL: 25,
   STAR: 25
 };
 
-export type ClothProductKey = keyof typeof OPENING_SQFT_RATES;
+export type SqftProductKey = keyof typeof OPENING_SQFT_RATES;
 
-export function isClothProduct(key: ProductKey): key is ClothProductKey {
-  return key === 'FLEX' || key === 'VINYL' || key === 'STAR';
+export function isSqftProduct(key: ProductKey): key is SqftProductKey {
+  return key === 'FLEX' || key === 'SUNPACK' || key === 'VINYL' || key === 'STAR';
 }
 
-/** Bumping this stamp re-applies the opening rates exactly once per workspace. */
-export const OPENING_RATES_VERSION = 1;
+/**
+ * Bumping this stamp re-applies the unified square-feet migration exactly once
+ * per workspace. Version 2 folds Sunpack into the same ₹/sq.ft model as
+ * Flex/Vinyl/Star without ever discarding an owner-entered rate.
+ */
+export const OPENING_RATES_VERSION = 2;
 
 /**
  * Frame beading choices. The shop's price chart lists one fixed price per
@@ -102,25 +108,25 @@ export function frameSeedId(width: number, height: number): string {
   return `frame-${width}x${height}`;
 }
 
-/** Product seeds. Square-feet rates start at the shop's opening rates; Sunpack stays owner-set. */
+/** Product seeds. Square-feet rates start at the shop's opening rates. */
 export function productSeed(key: ProductKey, now: string): ProductConfig {
   const frame = key === 'FRAME';
-  const cloth = isClothProduct(key);
+  const sqft = isSqftProduct(key);
   return {
     id: `product-${key.toLowerCase()}`,
     key,
     name: PRODUCT_NAMES[key].en,
     nameTa: PRODUCT_NAMES[key].ta,
     pricingMode: frame ? 'fixed' : 'sqft',
-    rate: cloth ? OPENING_SQFT_RATES[key] : 0,
-    basisSqft: cloth ? 1 : 16,
+    rate: sqft ? OPENING_SQFT_RATES[key] : 0,
+    basisSqft: sqft ? 1 : 16,
     minSqft: 0,
     minChargeEnabled: false,
     rounding: 'nearest',
     active: true,
     purchaseCostPerSqft: 0,
     trackStock: false,
-    openingRatesVersion: cloth ? OPENING_RATES_VERSION : undefined,
+    openingRatesVersion: sqft ? OPENING_RATES_VERSION : undefined,
     createdAt: now,
     updatedAt: now
   };
@@ -130,6 +136,23 @@ export const DEFAULT_ACCESS = {
   ownerEmail: '',
   allowedEmails: [] as string[],
   requireAllowlist: false
+};
+
+/**
+ * The original KALAI DIGITAL Paytm UPI QR poster supplied by the owner
+ * (UPI ID paytm.s16gsmj@pty). It is only a fallback asset; Settings stores an
+ * uploaded image as a durable data URL. The app never generates a QR.
+ */
+export const BUNDLED_PAYMENT_QR = './payment-qr.webp';
+
+export const DEFAULT_PAYMENT_DETAILS: PaymentDetails = {
+  showQr: true,
+  businessMobile: '',
+  upiId: 'paytm.s16gsmj@pty',
+  payeeName: 'KALAI DIGITAL',
+  qrImage: BUNDLED_PAYMENT_QR,
+  showLogos: true,
+  footerMessage: 'Scan & pay with any UPI app'
 };
 
 export const DEFAULT_SETTINGS: BusinessSettings = {
@@ -159,6 +182,7 @@ export const DEFAULT_SETTINGS: BusinessSettings = {
   showSqftOnInvoice: true,
   language: 'en',
   theme: 'light',
+  payment: DEFAULT_PAYMENT_DETAILS,
   inventoryEnabled: false,
   allowNegativeStock: false,
   lowStockAlerts: true,

@@ -1,7 +1,8 @@
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
-import type { Bill, BusinessSettings } from '../lib/types';
+import type { Bill, BusinessSettings, PaymentSnapshot } from '../lib/types';
 import { formatDate } from '../lib/format';
+import { absoluteAssetUrl, paymentMobile, paymentSnapshotFor } from '../lib/payment';
 import { isNative } from '../lib/platform';
 import { saveFile } from './download';
 
@@ -28,6 +29,136 @@ export function billFileName(bill: Bill, ext: 'pdf' | 'jpg'): string {
   return `${safeFileName(bill.number, 'invoice')}_${safeFileName(bill.customer.name, 'customer')}.${ext}`;
 }
 
+export interface QrImage {
+  dataUrl: string;
+  /** height ÷ width, so the printout never stretches the QR. */
+  ratio: number;
+}
+
+/**
+ * Loads the invoice QR into a PNG data URL for jsPDF. jsPDF cannot embed WebP,
+ * and the bundled asset is WebP, so the supplied image is drawn once onto a
+ * white canvas. The QR pattern itself is never re-generated or edited.
+ */
+export async function loadQrImage(value: string): Promise<QrImage | null> {
+  const src = absoluteAssetUrl(value);
+  if (!src || typeof document === 'undefined') return null;
+  try {
+    const img = await new Promise<HTMLImageElement>((resolve, reject) => {
+      const el = new Image();
+      el.onload = () => resolve(el);
+      el.onerror = () => reject(new Error('The payment QR image could not be loaded.'));
+      el.src = src;
+    });
+    const width = img.naturalWidth || 640;
+    const height = img.naturalHeight || 640;
+    const canvas = document.createElement('canvas');
+    canvas.width = width;
+    canvas.height = height;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return null;
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, width, height);
+    ctx.drawImage(img, 0, 0, width, height);
+    return { dataUrl: canvas.toDataURL('image/png'), ratio: height / width };
+  } catch {
+    return null;
+  }
+}
+
+const PAY_BOX_H = 46;
+
+/**
+ * Draws the Scan & Pay panel on the A4 invoice. When the owner has not
+ * configured a QR the slot stays empty and says so; no QR is ever invented.
+ */
+function drawPaymentBlock(
+  doc: jsPDF,
+  payment: PaymentSnapshot,
+  qr: QrImage | null,
+  fallbackMobile: string,
+  left: number,
+  right: number,
+  top: number
+): void {
+  doc.setDrawColor(231, 220, 207);
+  doc.setLineWidth(0.3);
+  doc.roundedRect(left, top, right - left, PAY_BOX_H, 2.4, 2.4, 'S');
+
+  const pad = 3;
+  const slotW = 40;
+  const slotH = PAY_BOX_H - pad * 2;
+
+  if (qr) {
+    let w = slotW;
+    let h = w * qr.ratio;
+    if (h > slotH) {
+      h = slotH;
+      w = h / qr.ratio;
+    }
+    const x = left + pad + (slotW - w) / 2;
+    const y = top + pad + (slotH - h) / 2;
+    doc.setFillColor(255, 255, 255);
+    doc.rect(x, y, w, h, 'F');
+    doc.addImage(qr.dataUrl, 'PNG', x, y, w, h, undefined, 'FAST');
+  } else {
+    doc.setDrawColor(205, 192, 178);
+    doc.setLineDashPattern([1.1, 1.1], 0);
+    doc.rect(left + pad, top + pad, slotW, slotH, 'S');
+    doc.setLineDashPattern([], 0);
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(6.4);
+    doc.setTextColor(...MUTED);
+    doc.text('Payment QR', left + pad + slotW / 2, top + pad + slotH / 2 - 1.5, { align: 'center' });
+    doc.text('not configured', left + pad + slotW / 2, top + pad + slotH / 2 + 2.5, { align: 'center' });
+  }
+
+  const textX = left + pad + slotW + 5;
+  let ty = top + 7;
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(7);
+  doc.setTextColor(...GOLD);
+  doc.text('SCAN & PAY', textX, ty);
+
+  ty += 5.5;
+  doc.setFontSize(11);
+  doc.setTextColor(...BRAND);
+  doc.text(payment.payeeName || 'KALAI DIGITAL', textX, ty);
+
+  doc.setFont('courier', 'normal');
+  doc.setFontSize(8.2);
+  doc.setTextColor(...INK);
+  if (payment.upiId) {
+    ty += 5;
+    doc.text(`UPI: ${payment.upiId}`, textX, ty);
+  }
+  const mobile = paymentMobile(payment.businessMobile, fallbackMobile);
+  if (mobile) {
+    ty += 4.6;
+    doc.text(`Mobile: ${mobile}`, textX, ty);
+  }
+
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(7.2);
+  doc.setTextColor(...MUTED);
+  if (payment.showLogos) {
+    ty += 4.4;
+    doc.text('Google Pay  ·  PhonePe  ·  Paytm  ·  BHIM  ·  UPI', textX, ty);
+  }
+  if (payment.footerMessage) {
+    ty += 4.2;
+    doc.text(doc.splitTextToSize(payment.footerMessage, right - textX - pad) as string[], textX, ty);
+  }
+
+  doc.setFontSize(6.3);
+  doc.setTextColor(154, 137, 125);
+  doc.text(
+    doc.splitTextToSize('Scanning does not confirm payment. Please show the payment success screen.', right - textX - pad) as string[],
+    textX,
+    top + PAY_BOX_H - 4
+  );
+}
+
 function statusText(bill: Bill): string {
   if (bill.status === 'paid') return 'PAID';
   if (bill.status === 'partial') return 'PART PAID';
@@ -36,7 +167,7 @@ function statusText(bill: Bill): string {
 }
 
 /** Build a clean, text-based A4 invoice PDF (no DOM capture, works offline). */
-export function buildInvoicePdf(bill: Bill, settings: BusinessSettings): jsPDF {
+export function buildInvoicePdf(bill: Bill, settings: BusinessSettings, qr: QrImage | null = null): jsPDF {
   const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4', compress: true });
   const pageW = 210;
   const left = 14;
@@ -215,6 +346,19 @@ export function buildInvoicePdf(bill: Bill, settings: BusinessSettings): jsPDF {
   }
 
   const footerY = 282;
+
+  // Scan & Pay panel, above the footer. Bills issued before 1.4.0 fall back to
+  // the current settings because their original QR was never recorded.
+  const payment = paymentSnapshotFor(bill, settings);
+  if (payment.showQr) {
+    let payTop = noteYActual + 7;
+    if (payTop + PAY_BOX_H > footerY - 12) {
+      doc.addPage();
+      payTop = 20;
+    }
+    drawPaymentBlock(doc, payment, qr, settings.phone, left, right, payTop);
+  }
+
   doc.setDrawColor(234, 223, 210);
   doc.line(left, footerY - 7, right, footerY - 7);
   doc.setTextColor(...GOLD);
@@ -338,8 +482,15 @@ export function buildReportPdf(title: string, subtitle: string, sections: Report
  * download that the Android WebView silently ignores.
  */
 export async function downloadInvoicePdf(bill: Bill, settings: BusinessSettings): Promise<'native' | 'browser'> {
-  const blob = buildInvoicePdf(bill, settings).output('blob');
+  const blob = (await invoicePdfWithQr(bill, settings)).output('blob');
   return saveFile(billFileName(bill, 'pdf'), blob, 'application/pdf');
+}
+
+/** Builds the invoice PDF with the bill's own payment QR already embedded. */
+export async function invoicePdfWithQr(bill: Bill, settings: BusinessSettings): Promise<jsPDF> {
+  const payment = paymentSnapshotFor(bill, settings);
+  const qr = payment.showQr ? await loadQrImage(payment.qrImage) : null;
+  return buildInvoicePdf(bill, settings, qr);
 }
 
 export async function downloadReportPdf(title: string, subtitle: string, sections: ReportSection[], filename: string, settings?: BusinessSettings): Promise<'native' | 'browser'> {
@@ -361,7 +512,7 @@ function blobToBase64(blob: Blob): Promise<string> {
 
 /** Share on Android/iOS through the native share sheet; download elsewhere. */
 export async function shareInvoicePdf(bill: Bill, settings: BusinessSettings): Promise<void> {
-  const doc = buildInvoicePdf(bill, settings);
+  const doc = await invoicePdfWithQr(bill, settings);
   const blob = doc.output('blob');
   const filename = billFileName(bill, 'pdf');
 

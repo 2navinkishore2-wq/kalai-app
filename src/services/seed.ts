@@ -1,14 +1,16 @@
 import {
   DEFAULT_ACCESS,
+  DEFAULT_PAYMENT_DETAILS,
   DEFAULT_SETTINGS,
   FRAME_PRICE_SEED,
   OPENING_RATES_VERSION,
   OPENING_SQFT_RATES,
   PRODUCT_KEYS,
   frameSeedId,
-  isClothProduct,
+  isSqftProduct,
   productSeed
 } from '../lib/constants';
+import { round2 } from '../lib/money';
 import type { BusinessSettings, FrameSize, ProductConfig } from '../lib/types';
 import type { DataService } from './data';
 
@@ -17,10 +19,15 @@ function iso(): string {
 }
 
 /**
- * Creates missing product docs and applies the shop's opening Flex/Vinyl/Star
- * rates exactly once. The `openingRatesVersion` stamp lives on each product doc,
- * so later owner edits are never overwritten and the migration syncs with the
+ * Creates missing product docs and applies the unified square-feet pricing
+ * exactly once. The `openingRatesVersion` stamp lives on each product doc, so
+ * later owner edits are never overwritten and the migration syncs with the
  * account like any other rate change.
+ *
+ * Version 2 folds Sunpack into the same per-sq.ft model as Flex/Vinyl/Star.
+ * A legacy per-16-sq.ft rate is converted to the equivalent per-sq.ft value
+ * (rate ÷ basis) instead of being discarded, and a zero/unset rate receives the
+ * shop's opening rate.
  */
 async function ensureProductConfigs(svc: DataService, products: ProductConfig[]): Promise<void> {
   const byKey = new Map(products.map((p) => [p.key, p]));
@@ -31,13 +38,23 @@ async function ensureProductConfigs(svc: DataService, products: ProductConfig[])
       await svc.set('productConfigs', seed.id, seed as unknown as Record<string, unknown>);
       continue;
     }
-    if (isClothProduct(key) && existing.openingRatesVersion !== OPENING_RATES_VERSION) {
-      await svc.set('productConfigs', existing.id, {
+    if (isSqftProduct(key) && existing.openingRatesVersion !== OPENING_RATES_VERSION) {
+      const oldBasis = Number(existing.basisSqft) > 0 ? Number(existing.basisSqft) : 1;
+      const oldRate = Number(existing.rate) > 0 ? Number(existing.rate) : 0;
+      const perSqft = oldBasis > 1 && oldRate > 0 ? round2(oldRate / oldBasis) : oldRate;
+      const patch: Record<string, unknown> = {
         pricingMode: 'sqft',
-        rate: OPENING_SQFT_RATES[key],
+        rate: perSqft > 0 ? perSqft : OPENING_SQFT_RATES[key],
         basisSqft: 1,
         openingRatesVersion: OPENING_RATES_VERSION
-      });
+      };
+      // Sunpack used to expose unrelated basis/minimum controls. The requested
+      // rule is the simple area × rate × qty model, with no minimum area.
+      if (key === 'SUNPACK') {
+        patch.minSqft = 0;
+        patch.minChargeEnabled = false;
+      }
+      await svc.set('productConfigs', existing.id, patch);
     }
   }
 }
@@ -102,9 +119,17 @@ export async function seedWorkspace(svc: DataService, email?: string | null): Pr
 }
 
 export function normalizeSettings(doc?: (Partial<BusinessSettings> & { id?: string }) | null): BusinessSettings {
+  const rawPayment = doc?.payment || ({} as Partial<BusinessSettings['payment']>);
   return {
     ...DEFAULT_SETTINGS,
     ...(doc || {}),
+    payment: {
+      ...DEFAULT_PAYMENT_DETAILS,
+      ...rawPayment,
+      showQr: rawPayment.showQr !== false,
+      showLogos: rawPayment.showLogos !== false,
+      qrImage: typeof rawPayment.qrImage === 'string' ? rawPayment.qrImage : DEFAULT_PAYMENT_DETAILS.qrImage
+    },
     access: {
       ...DEFAULT_ACCESS,
       ...(doc?.access || {}),

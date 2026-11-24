@@ -7,8 +7,41 @@ export type DiscountType = 'amount' | 'percent';
 export type BillStatus = 'paid' | 'partial' | 'credit' | 'cancelled';
 export type SyncStatus = 'synced' | 'syncing' | 'offline' | 'error';
 export type PaymentMethod = 'Cash' | 'UPI' | 'Bank Transfer' | 'Other' | 'Credit';
-export type ThemeMode = 'light' | 'dark';
+export type ThemeMode =
+  | 'light'
+  | 'dark'
+  | 'neon-blue'
+  | 'neon-purple'
+  | 'neon-green'
+  | 'dark-red'
+  | 'dark-gold'
+  | 'clean-white'
+  | 'modern-blue';
 export type Language = 'en' | 'ta';
+
+/**
+ * Payment details printed on invoices. They are deliberately separate from the
+ * business contact fields so the QR destination can be changed on its own.
+ */
+export interface PaymentDetails {
+  showQr: boolean;
+  businessMobile: string;
+  upiId: string;
+  payeeName: string;
+  /** Data URL from Settings, or the bundled original KALAI QR asset. */
+  qrImage: string;
+  showLogos: boolean;
+  footerMessage: string;
+}
+
+/**
+ * A copy of the payment details captured when a bill was issued. Saved on the
+ * bill so editing Settings later cannot silently redirect an old invoice to a
+ * different QR code or UPI ID.
+ */
+export interface PaymentSnapshot extends PaymentDetails {
+  capturedAt: string;
+}
 
 export interface AuthUser {
   uid: string;
@@ -127,6 +160,8 @@ export interface Bill {
   note?: string;
   cancelled?: boolean;
   cancelReason?: string;
+  /** Payment details as they were when this bill was issued (1.4.0+). */
+  payment?: PaymentSnapshot;
   version: number;
   createdAt: string;
   updatedAt: string;
@@ -241,6 +276,7 @@ export interface BusinessSettings {
   showSqftOnInvoice: boolean;
   language: Language;
   theme: ThemeMode;
+  payment: PaymentDetails;
   inventoryEnabled: boolean;
   allowNegativeStock: boolean;
   lowStockAlerts: boolean;

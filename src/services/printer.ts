@@ -1,6 +1,7 @@
 import type { Bill, BusinessSettings } from '../lib/types';
 import { formatDate, formatINR } from '../lib/format';
 import { logoSrc } from '../lib/logo';
+import { absoluteAssetUrl, paymentMobile, paymentSnapshotFor } from '../lib/payment';
 
 function esc(value: unknown): string {
   return String(value ?? '')
@@ -41,6 +42,26 @@ function receiptHtml(bill: Bill, settings: BusinessSettings): string {
   rows.push(`<div class="row"><span>Paid</span><span>${esc(formatINR(bill.paid))}</span></div>`);
   rows.push(`<div class="row strong"><span>Balance</span><span>${esc(formatINR(bill.balance))}</span></div>`);
 
+  // The bill's own payment snapshot: an old receipt never starts pointing at a
+  // QR or UPI ID that was changed after the bill was issued.
+  const payment = paymentSnapshotFor(bill, settings);
+  const qrSrc = payment.showQr ? absoluteAssetUrl(payment.qrImage) : '';
+  const payMobile = paymentMobile(payment.businessMobile, settings.phone);
+  const payBlock = payment.showQr
+    ? `<div class="sep"></div>
+  <div class="qr-block">
+    ${qrSrc
+      ? `<img class="qr" src="${esc(qrSrc)}" alt="UPI payment QR">`
+      : `<div class="qr-missing">Payment QR not configured</div>`}
+    <div class="qr-cap">SCAN &amp; PAY</div>
+    ${payment.upiId ? `<div class="qr-line">UPI: <b>${esc(payment.upiId)}</b></div>` : ''}
+    ${payMobile ? `<div class="qr-line">Mobile: ${esc(payMobile)}</div>` : ''}
+    ${payment.showLogos ? `<div class="qr-line">Google Pay · PhonePe · Paytm · BHIM</div>` : ''}
+    ${payment.footerMessage ? `<div class="qr-line">${esc(payment.footerMessage)}</div>` : ''}
+    <div class="qr-note">Scanning does not confirm payment.</div>
+  </div>`
+    : '';
+
   return `<!doctype html>
 <html><head><meta charset="utf-8"><title>${esc(bill.number)}</title>
 <style>
@@ -68,6 +89,12 @@ function receiptHtml(bill: Bill, settings: BusinessSettings): string {
   .terms { margin-top: 1mm; font-size: ${width === 58 ? 6.2 : 6.8}px; text-align: center; }
   .status { text-align: center; font-weight: 700; margin: .8mm 0; letter-spacing: .5px; }
   .pay { font-size: ${width === 58 ? 6.4 : 7}px; margin-top: .8mm; }
+  .qr-block { text-align: center; margin-top: 1mm; }
+  .qr { display: block; width: ${width === 58 ? 30 : 42}mm; height: auto; margin: 0 auto .8mm; }
+  .qr-missing { border: 1px dashed #000; padding: 3mm 1mm; font-size: ${width === 58 ? 6.4 : 7}px; margin: 0 auto .8mm; width: ${width === 58 ? 30 : 42}mm; }
+  .qr-cap { font-weight: 700; letter-spacing: .5px; font-size: ${width === 58 ? 7.4 : 8.2}px; }
+  .qr-line { font-size: ${width === 58 ? 6.4 : 7}px; margin-top: .4mm; word-break: break-word; }
+  .qr-note { font-size: ${width === 58 ? 5.8 : 6.2}px; margin-top: .5mm; }
 </style></head>
 <body><div class="wrap">
   ${settings.showLogoOnInvoice ? `<img class="logo" src="${esc(settings.logoUrl || logoSrc())}" alt="">` : ''}
@@ -88,6 +115,7 @@ function receiptHtml(bill: Bill, settings: BusinessSettings): string {
   ${rows.join('')}
   ${bill.payments.length > 0 ? `<div class="pay">Payments: ${esc(bill.payments.map((p) => `${p.method} ${formatINR(p.amount)} ${formatDate(p.date)}`).join(', '))}</div>` : ''}
   ${bill.note ? `<div class="pay">Note: ${esc(bill.note)}</div>` : ''}
+  ${payBlock}
   <div class="sep"></div>
   <div class="thanks">${esc(settings.invoiceFooter || settings.thankYou || 'Thank you!')}</div>
   <div class="terms">${esc(settings.terms || '')}</div>

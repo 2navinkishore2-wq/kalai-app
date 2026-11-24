@@ -1,34 +1,12 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Frame, IndianRupee, Pencil, Plus, Power, Save, Trash2, TriangleAlert } from 'lucide-react';
 import { useApp } from '../store/AppContext';
-import type { FrameSize, ProductConfig, RoundingMode } from '../lib/types';
+import type { FrameSize, ProductConfig } from '../lib/types';
 import { PRODUCT_KEYS, SQFT_RATE_PRODUCTS, frameSeedId } from '../lib/constants';
 import { uid } from '../lib/ids';
 import { formatINR } from '../lib/format';
 import { addAudit } from '../services/audit';
-import { Button, Card, ConfirmDialog, Field, Input, Modal, PageHeader, Pill, SectionNote, Select, useToast } from '../components/ui';
-
-type ProductDraft = {
-  rate: string;
-  basisSqft: string;
-  minSqft: string;
-  minChargeEnabled: boolean;
-  rounding: RoundingMode;
-  active: boolean;
-  purchaseCostPerSqft: string;
-};
-
-function draftFrom(p: ProductConfig): ProductDraft {
-  return {
-    rate: String(p.rate ?? 0),
-    basisSqft: String(p.basisSqft ?? 16),
-    minSqft: String(p.minSqft ?? 0),
-    minChargeEnabled: !!p.minChargeEnabled,
-    rounding: p.rounding || 'nearest',
-    active: p.active !== false,
-    purchaseCostPerSqft: String(p.purchaseCostPerSqft ?? 0)
-  };
-}
+import { Button, Card, ConfirmDialog, Field, Input, Modal, PageHeader, Pill, SectionNote, useToast } from '../components/ui';
 
 export function ProductsPage() {
   const app = useApp();
@@ -173,13 +151,13 @@ export function ProductsPage() {
       ) : null}
 
       <SectionNote tone="info">
-        <b>Square-feet formula:</b> Area = width (ft) × height (ft); line total = area × rate per sq.ft × quantity. Flex, Vinyl and Star are entered in feet. <b>Frame:</b> line total = fixed price per piece × quantity.
+        <b>Square-feet formula:</b> Area = width (ft) × height (ft); line total = area × rate per sq.ft × quantity. Flex, Sunpack, Vinyl and Star all use this one model and are entered in feet (inches are also accepted and converted). <b>Frame:</b> line total = fixed price per piece × quantity.
       </SectionNote>
 
       <RateBook canEdit={canEdit} />
 
       <div className="grid grid-2" style={{ marginTop: 12 }}>
-        {PRODUCT_KEYS.filter((key) => key === 'SUNPACK' || key === 'FRAME').map((key) => {
+        {PRODUCT_KEYS.filter((key) => key === 'FRAME').map((key) => {
           const product = app.products.find((p) => p.key === key);
           if (!product) return null;
           return <ProductEditor key={key} product={product} canEdit={canEdit} />;
@@ -275,7 +253,7 @@ export function ProductsPage() {
 function RateBook({ canEdit }: { canEdit: boolean }) {
   const app = useApp();
   const toast = useToast();
-  const cloth = useMemo(
+  const sqftProducts = useMemo(
     () => SQFT_RATE_PRODUCTS
       .map((key) => app.products.find((p) => p.key === key))
       .filter((p): p is ProductConfig => !!p),
@@ -289,9 +267,9 @@ function RateBook({ canEdit }: { canEdit: boolean }) {
 
   useEffect(() => {
     setDraft(
-      Object.fromEntries(cloth.map((p) => [p.key, { rate: String(p.rate ?? 0), active: p.active !== false }]))
+      Object.fromEntries(sqftProducts.map((p) => [p.key, { rate: String(p.rate ?? 0), active: p.active !== false }]))
     );
-  }, [cloth]);
+  }, [sqftProducts]);
 
   const update = (key: string, patch: Partial<RateDraft>) => {
     setDraft((d) => ({
@@ -304,7 +282,7 @@ function RateBook({ canEdit }: { canEdit: boolean }) {
   const save = async () => {
     if (!canEdit) return setError('Only the owner can change rates.');
     setError('');
-    const rows = cloth.map((p) => {
+    const rows = sqftProducts.map((p) => {
       const d = draft[p.key] || { rate: String(p.rate ?? 0), active: p.active !== false };
       return { product: p, rate: parseFloat(d.rate), active: d.active };
     });
@@ -318,6 +296,8 @@ function RateBook({ canEdit }: { canEdit: boolean }) {
           pricingMode: 'sqft',
           rate: row.rate,
           basisSqft: 1,
+          minSqft: 0,
+          minChargeEnabled: false,
           active: row.active
         });
       }
@@ -326,7 +306,7 @@ function RateBook({ canEdit }: { canEdit: boolean }) {
         entity: 'product',
         entityId: 'rate-book',
         action: 'update',
-        summary: `Flex/Vinyl/Star rates saved — ${summary}`
+        summary: `Flex/Sunpack/Vinyl/Star rates saved — ${summary}`
       });
       toast(`Rates saved — ${summary}`, 'success');
       setSavedAt(new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
@@ -339,11 +319,11 @@ function RateBook({ canEdit }: { canEdit: boolean }) {
 
   return (
     <Card
-      title={<span><IndianRupee size={16} style={{ verticalAlign: -3, marginRight: 6 }} />Flex, Vinyl &amp; Star rates</span>}
-      subtitle="Directly editable ₹/sq.ft rates. These are the rates every new bill uses."
+      title={<span><IndianRupee size={16} style={{ verticalAlign: -3, marginRight: 6 }} />Flex, Sunpack, Vinyl &amp; Star rates</span>}
+      subtitle="One editable ₹/sq.ft rate per product. These are the rates every new bill uses."
     >
-      <div className="grid grid-3">
-        {cloth.map((p) => (
+      <div className="grid grid-4">
+        {sqftProducts.map((p) => (
           <div key={p.key} style={{ background: 'var(--surface-2)', border: '1px solid var(--border)', borderRadius: 10, padding: '10px 12px' }}>
             <div style={{ fontWeight: 700, marginBottom: 8 }}>
               {p.name} <span className="muted small" style={{ fontWeight: 500 }}>{p.nameTa}</span>
@@ -375,7 +355,7 @@ function RateBook({ canEdit }: { canEdit: boolean }) {
         <Button onClick={() => void save()} loading={saving} disabled={!canEdit}>
           <Save size={15} /> Save Rates / <span lang="ta">விலையைச் சேமி</span>
         </Button>
-        <span className="muted small">Line total = width (ft) × height (ft) × rate × quantity.</span>
+        <span className="muted small">Line total = width (ft) × height (ft) × ₹/sq.ft × quantity. No minimum area and no hidden basis.</span>
       </div>
       {savedAt ? (
         <SectionNote tone="success">Rates saved at {savedAt} and stored in this account. New bills on Android and Windows use these saved values.</SectionNote>
@@ -388,48 +368,26 @@ function RateBook({ canEdit }: { canEdit: boolean }) {
 function ProductEditor({ product, canEdit }: { product: ProductConfig; canEdit: boolean }) {
   const app = useApp();
   const toast = useToast();
-  const [draft, setDraft] = useState<ProductDraft>(() => draftFrom(product));
+  const [active, setActive] = useState(!!product.active);
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
-  const frame = product.key === 'FRAME';
 
   useEffect(() => {
-    setDraft(draftFrom(product));
+    setActive(!!product.active);
   }, [product]);
 
   const save = async () => {
     if (!canEdit) return setError('Only the owner can change rates.');
-    const rate = parseFloat(draft.rate);
-    const basis = parseFloat(draft.basisSqft);
-    const minSqft = parseFloat(draft.minSqft);
-    const cost = parseFloat(draft.purchaseCostPerSqft);
-    if (!frame && (!Number.isFinite(rate) || rate < 0)) return setError('Enter a valid rate (0 or more).');
-    if (!Number.isFinite(basis) || basis <= 0) return setError('Pricing basis must be greater than zero.');
-    if (!Number.isFinite(minSqft) || minSqft < 0) return setError('Minimum sq.ft must be zero or more.');
-    if (!Number.isFinite(cost) || cost < 0) return setError('Purchase cost must be zero or more.');
-
     setSaving(true);
     try {
-      await app.service.set('productConfigs', product.id, {
-        key: product.key,
-        name: product.name,
-        nameTa: product.nameTa,
-        pricingMode: frame ? 'fixed' : 'sqft',
-        rate: frame ? 0 : rate,
-        basisSqft: basis,
-        minSqft,
-        minChargeEnabled: frame ? false : draft.minChargeEnabled,
-        rounding: draft.rounding,
-        active: draft.active,
-        purchaseCostPerSqft: cost
-      });
+      await app.service.set('productConfigs', product.id, { active });
       await addAudit(app.service, app.user, {
         entity: 'product',
         entityId: product.id,
         action: 'update',
-        summary: `${product.name} updated — ${frame ? 'fixed frame pricing' : `₹${rate} per ${basis} sq.ft`}${draft.active ? '' : ' (inactive)'}`
+        summary: `Frame ${active ? 'enabled' : 'disabled'} for billing`
       });
-      toast(`${product.name} settings saved`, 'success');
+      toast('Frame settings saved', 'success');
       setError('');
     } catch (e) {
       setError((e as Error).message);
@@ -439,7 +397,7 @@ function ProductEditor({ product, canEdit }: { product: ProductConfig; canEdit: 
   };
 
   const reset = () => {
-    setDraft(draftFrom(product));
+    setActive(!!product.active);
     setError('');
   };
 
@@ -449,68 +407,22 @@ function ProductEditor({ product, canEdit }: { product: ProductConfig; canEdit: 
         <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
           {product.name}
           <span className="muted small" style={{ fontWeight: 500 }}>{product.nameTa}</span>
-          {product.active ? <Pill tone="green">Active</Pill> : <Pill tone="red">Inactive</Pill>}
+          {active ? <Pill tone="green">Active</Pill> : <Pill tone="red">Inactive</Pill>}
         </span>
       }
-      subtitle={frame ? 'Fixed size-wise price from the frame table below.' : 'Square-feet pricing with configurable basis, minimum and rounding.'}
+      subtitle="Fixed price per piece. Every size and price is edited in the frame table below."
     >
-      {frame ? (
+      <div className="keyval" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 12px', background: 'var(--surface-2)', borderRadius: 10, border: '1px solid var(--border)' }}>
         <div>
-          <div className="keyval" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 12px', background: 'var(--surface-2)', borderRadius: 10, border: '1px solid var(--border)' }}>
-            <div>
-              <div style={{ fontWeight: 650 }}>Fixed frame pricing</div>
-              <div className="cell-sub">Prices come from the {app.frames.length}-size frame table. Edit a size to change its price.</div>
-            </div>
-            <IndianRupee size={18} color="var(--gold-600)" />
-          </div>
-          <label className="check" style={{ marginTop: 12 }}>
-            <input type="checkbox" checked={draft.active} disabled={!canEdit} onChange={(e) => setDraft({ ...draft, active: e.target.checked })} />
-            Available for billing
-          </label>
+          <div style={{ fontWeight: 650 }}>Fixed frame pricing</div>
+          <div className="cell-sub">Prices come from the {app.frames.length}-size frame table. Edit a size to change its price.</div>
         </div>
-      ) : (
-        <>
-          {product.rate <= 0 ? <SectionNote tone="warn">No rate configured yet. Bills cannot price {product.name} until you enter the shop's rate.</SectionNote> : null}
-          <div className="input-row" style={{ marginTop: product.rate <= 0 ? 10 : 0 }}>
-            <Field label="Rate (₹)" hint={`Per ${draft.basisSqft || 16} sq.ft`} required>
-              <Input type="number" min={0} step="any" value={draft.rate} disabled={!canEdit} onChange={(e) => setDraft({ ...draft, rate: e.target.value })} />
-            </Field>
-            <Field label="Basis (sq.ft)" hint="Default 16" required>
-              <Input type="number" min={0.01} step="any" value={draft.basisSqft} disabled={!canEdit} onChange={(e) => setDraft({ ...draft, basisSqft: e.target.value })} />
-            </Field>
-            <Field label="Rounding">
-              <Select value={draft.rounding} disabled={!canEdit} onChange={(e) => setDraft({ ...draft, rounding: e.target.value as RoundingMode })}>
-                <option value="none">No rounding (2 decimals)</option>
-                <option value="nearest">Nearest rupee</option>
-                <option value="up">Round up</option>
-                <option value="down">Round down</option>
-              </Select>
-            </Field>
-          </div>
-          <div className="input-row" style={{ marginTop: 10 }}>
-            <Field label="Minimum charge (sq.ft)" hint="Applied when enabled">
-              <Input type="number" min={0} step="any" value={draft.minSqft} disabled={!canEdit} onChange={(e) => setDraft({ ...draft, minSqft: e.target.value })} />
-            </Field>
-            <Field label="Cost per sq.ft" hint="Optional, for profit estimates">
-              <Input type="number" min={0} step="any" value={draft.purchaseCostPerSqft} disabled={!canEdit} onChange={(e) => setDraft({ ...draft, purchaseCostPerSqft: e.target.value })} />
-            </Field>
-            <Field label="Status">
-              <label className="check" style={{ minHeight: 38 }}>
-                <input type="checkbox" checked={draft.active} disabled={!canEdit} onChange={(e) => setDraft({ ...draft, active: e.target.checked })} />
-                Active
-              </label>
-            </Field>
-          </div>
-          <label className="check" style={{ marginTop: 10 }}>
-            <input type="checkbox" checked={draft.minChargeEnabled} disabled={!canEdit} onChange={(e) => setDraft({ ...draft, minChargeEnabled: e.target.checked })} />
-            Apply minimum charge ({draft.minSqft || 0} sq.ft)
-          </label>
-          <div className="calc-preview" style={{ marginTop: 10 }}>
-            Amount = (chargeable sq.ft ÷ {draft.basisSqft || 16}) × {formatINR(parseFloat(draft.rate) || 0)} × qty
-            {draft.minChargeEnabled ? ` · minimum ${draft.minSqft || 0} sq.ft` : ''} · rounding: {draft.rounding}
-          </div>
-        </>
-      )}
+        <IndianRupee size={18} color="var(--gold-600)" />
+      </div>
+      <label className="check" style={{ marginTop: 12 }}>
+        <input type="checkbox" checked={active} disabled={!canEdit} onChange={(e) => setActive(e.target.checked)} />
+        Available for billing
+      </label>
 
       {error ? <div className="form-error" style={{ marginTop: 8 }}>{error}</div> : null}
       {canEdit ? (

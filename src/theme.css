@@ -2425,3 +2425,508 @@ table.tbl {
   background: var(--border-strong);
   border-radius: 9px;
 }
+
+/* ------------------------------------------------- invoice payment block */
+/* The invoice always prints on white paper, so these colours are fixed and
+   never follow the app theme. */
+.inv-pay {
+  display: flex;
+  gap: 14px;
+  align-items: center;
+  margin-top: 14px;
+  padding: 10px 12px;
+  border: 1px solid #e7dccf;
+  border-radius: 10px;
+  background: #fffdf8;
+  page-break-inside: avoid;
+  break-inside: avoid;
+}
+
+.inv-pay-qr {
+  flex: 0 0 auto;
+  width: 118px;
+  padding: 5px;
+  background: #fff;
+  border: 1px solid #e7dccf;
+  border-radius: 8px;
+  display: grid;
+  place-items: center;
+}
+
+.inv-pay-qr img {
+  display: block;
+  width: 100%;
+  height: auto;
+  max-height: 170px;
+  object-fit: contain;
+  image-rendering: -webkit-optimize-contrast;
+}
+
+.inv-qr-missing {
+  width: 100%;
+  min-height: 92px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  border: 1px dashed #d8cabb;
+  border-radius: 6px;
+  color: #9a897d;
+  font-size: 9px;
+  text-align: center;
+  padding: 6px;
+}
+
+.inv-qr-missing b {
+  color: #7b1220;
+  font-size: 9.5px;
+}
+
+.inv-pay-info {
+  min-width: 0;
+  flex: 1;
+  font-size: 10.5px;
+  color: #4a3a32;
+}
+
+.inv-pay-cap {
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: #a87c1d;
+}
+
+.inv-pay-name {
+  font-size: 13px;
+  font-weight: 800;
+  color: #7b1220;
+  margin-top: 1px;
+}
+
+.inv-pay-row {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  margin-top: 2px;
+}
+
+.inv-pay-row span {
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: #9a897d;
+  min-width: 44px;
+}
+
+.inv-pay-row b {
+  font-size: 11px;
+  color: #241a16;
+  word-break: break-word;
+}
+
+.inv-pay-apps {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 6px;
+}
+
+.pay-app {
+  border: 1px solid #e2d4c4;
+  background: #fff;
+  border-radius: 4px;
+  padding: 1px 5px;
+  font-size: 8px;
+  font-weight: 700;
+  color: #4a3a32;
+  letter-spacing: 0.01em;
+}
+
+.pay-app-paytm {
+  border-color: #a9d8f0;
+  color: #0a6fa8;
+}
+
+.pay-app-gpay {
+  border-color: #cfd6f5;
+  color: #3b4a9b;
+}
+
+.pay-app-phonepe {
+  border-color: #d6c9f0;
+  color: #5b2a9b;
+}
+
+.pay-app-bhim {
+  border-color: #f0d9b5;
+  color: #8a5a12;
+}
+
+.inv-pay-note {
+  margin-top: 5px;
+  font-size: 9px;
+  color: #6b5a50;
+}
+
+.inv-pay-brand {
+  margin-top: 3px;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  color: #7b1220;
+}
+
+.inv-pay-disclaimer {
+  margin-top: 4px;
+  font-size: 7.6px;
+  line-height: 1.35;
+  color: #9a897d;
+}
+
+/* Phones: keep the QR large enough to scan and the text readable. */
+@media screen and (max-width: 640px) {
+  .inv-pay {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 10px;
+  }
+  .inv-pay-qr {
+    width: 160px;
+    align-self: center;
+  }
+  .inv-pay-info {
+    text-align: center;
+  }
+  .inv-pay-row {
+    justify-content: center;
+  }
+  .inv-pay-apps {
+    justify-content: center;
+  }
+}
+
+/* ------------------------------------------------ settings payment QR UI */
+.qr-settings {
+  display: flex;
+  gap: 16px;
+  align-items: flex-start;
+  flex-wrap: wrap;
+}
+
+.qr-settings-preview {
+  width: 156px;
+  padding: 6px;
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  display: grid;
+  place-items: center;
+  flex: none;
+}
+
+.qr-settings-preview img {
+  display: block;
+  width: 100%;
+  height: auto;
+  max-height: 220px;
+  object-fit: contain;
+}
+
+.qr-settings-empty {
+  width: 100%;
+  min-height: 130px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  text-align: center;
+  color: var(--text-3);
+  border: 1px dashed var(--border-strong);
+  border-radius: 7px;
+  padding: 8px;
+  font-size: 11.5px;
+}
+
+.qr-settings-empty b {
+  color: var(--text);
+  font-size: 12px;
+}
+
+/* ------------------------------------------------------------ themes */
+/* Dark/Yellow (default dark) and Dark/White (light) stay as they are. The
+   additional themes only re-map the same design tokens, so every screen,
+   dialog and invoice keeps its layout on Android and Windows. */
+
+:root[data-theme='clean-white'] {
+  --bg: #f8fafc;
+  --bg-2: #f1f5f9;
+  --surface: #ffffff;
+  --surface-2: #fbfdff;
+  --surface-3: #f1f5f9;
+  --border: #e2e8f0;
+  --border-strong: #cbd5e1;
+  --brand-950: #111827;
+  --brand-900: #1e293b;
+  --brand-800: #24344a;
+  --brand-700: #334155;
+  --brand-600: #3f5670;
+  --brand-500: #55708e;
+  --brand-100: #e6edf5;
+  --brand-50: #f3f7fb;
+  --gold-600: #9a6f16;
+  --gold-500: #b98a2e;
+  --gold-400: #d3a748;
+  --gold-100: #fbf3df;
+  --text: #1e293b;
+  --text-2: #51617a;
+  --text-3: #8493a8;
+  --green: #15803d;
+  --green-bg: #e7f7ee;
+  --red: #b42318;
+  --red-bg: #fdecea;
+  --amber: #a16207;
+  --amber-bg: #fef4e2;
+  --blue: #1d4ed8;
+  --blue-bg: #e8eefc;
+  --shadow-sm: 0 1px 2px rgba(15, 23, 42, 0.05);
+  --shadow: 0 6px 24px rgba(15, 23, 42, 0.07);
+  --shadow-lg: 0 18px 50px rgba(15, 23, 42, 0.14);
+}
+
+:root[data-theme='modern-blue'] {
+  --bg: #f3f7ff;
+  --bg-2: #eaf1fe;
+  --surface: #ffffff;
+  --surface-2: #f8fbff;
+  --surface-3: #eef4fd;
+  --border: #dbe6f7;
+  --border-strong: #c3d4ee;
+  --brand-950: #0b1b3a;
+  --brand-900: #12295a;
+  --brand-800: #163a7d;
+  --brand-700: #1b4aa8;
+  --brand-600: #1d4ed8;
+  --brand-500: #3b6ff0;
+  --brand-100: #dce8ff;
+  --brand-50: #eef4ff;
+  --gold-600: #0369a1;
+  --gold-500: #0284c7;
+  --gold-400: #38bdf8;
+  --gold-100: #e2f3fd;
+  --text: #14243d;
+  --text-2: #4a5f7e;
+  --text-3: #7f92ad;
+  --green: #15803d;
+  --green-bg: #e7f7ee;
+  --red: #b42318;
+  --red-bg: #fdecea;
+  --amber: #a16207;
+  --amber-bg: #fef4e2;
+  --blue: #1d4ed8;
+  --blue-bg: #e8eefc;
+  --shadow-sm: 0 1px 2px rgba(20, 36, 61, 0.06);
+  --shadow: 0 6px 24px rgba(20, 36, 61, 0.08);
+  --shadow-lg: 0 18px 50px rgba(20, 36, 61, 0.16);
+}
+
+:root[data-theme='dark-red'] {
+  --bg: #120809;
+  --bg-2: #180b0d;
+  --surface: #1a0e10;
+  --surface-2: #201316;
+  --surface-3: #28171a;
+  --border: #3a2326;
+  --border-strong: #4d2f33;
+  --brand-950: #150406;
+  --brand-900: #2a070c;
+  --brand-800: #3d0b12;
+  --brand-700: #6d1220;
+  --brand-600: #c81e2d;
+  --brand-500: #e03b45;
+  --brand-100: #3d161a;
+  --brand-50: #2b1013;
+  --gold-600: #d9ac45;
+  --gold-500: #e0b94e;
+  --gold-400: #f0cf78;
+  --gold-100: #3a2d13;
+  --text: #f7ecec;
+  --text-2: #cbb2b4;
+  --text-3: #9d8285;
+  --green: #57c08a;
+  --green-bg: #15301f;
+  --red: #ff8f84;
+  --red-bg: #3d1512;
+  --amber: #e6b25c;
+  --amber-bg: #352510;
+  --blue: #86b1e8;
+  --blue-bg: #16243a;
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.35);
+  --shadow: 0 8px 26px rgba(0, 0, 0, 0.4);
+  --shadow-lg: 0 22px 60px rgba(0, 0, 0, 0.6);
+}
+
+:root[data-theme='dark-gold'] {
+  --bg: #0f0c06;
+  --bg-2: #15110a;
+  --surface: #17130b;
+  --surface-2: #1d1810;
+  --surface-3: #241e14;
+  --border: #352c1c;
+  --border-strong: #4a3d27;
+  --brand-950: #100c04;
+  --brand-900: #1b1408;
+  --brand-800: #2a1f0b;
+  --brand-700: #5c440f;
+  --brand-600: #a87c1d;
+  --brand-500: #c99a2e;
+  --brand-100: #3a2f15;
+  --brand-50: #241d0f;
+  --gold-600: #e0b94e;
+  --gold-500: #ecc766;
+  --gold-400: #f6dc98;
+  --gold-100: #3d3116;
+  --text: #f7f0e2;
+  --text-2: #cfc1a5;
+  --text-3: #9e907a;
+  --green: #63c68e;
+  --green-bg: #18301f;
+  --red: #f09084;
+  --red-bg: #371713;
+  --amber: #e8bd63;
+  --amber-bg: #332711;
+  --blue: #87b2e6;
+  --blue-bg: #162437;
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.35);
+  --shadow: 0 8px 26px rgba(0, 0, 0, 0.42);
+  --shadow-lg: 0 22px 60px rgba(0, 0, 0, 0.62);
+}
+
+:root[data-theme='neon-blue'] {
+  --bg: #070d17;
+  --bg-2: #0b1421;
+  --surface: #0d1725;
+  --surface-2: #111d2e;
+  --surface-3: #152436;
+  --border: #1d2f45;
+  --border-strong: #2a415c;
+  --brand-950: #04080f;
+  --brand-900: #071120;
+  --brand-800: #0b1b31;
+  --brand-700: #123057;
+  --brand-600: #1e6fff;
+  --brand-500: #3d86ff;
+  --brand-100: #152a44;
+  --brand-50: #0f1d31;
+  --gold-600: #4fd1ff;
+  --gold-500: #67d8ff;
+  --gold-400: #9fe9ff;
+  --gold-100: #0d2a3a;
+  --text: #e8f1ff;
+  --text-2: #a9bdd6;
+  --text-3: #7c92ad;
+  --green: #3ddc97;
+  --green-bg: #0b2a20;
+  --red: #ff7b72;
+  --red-bg: #331512;
+  --amber: #ffc45c;
+  --amber-bg: #2f240f;
+  --blue: #7cc4ff;
+  --blue-bg: #11263c;
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --shadow: 0 8px 26px rgba(0, 0, 0, 0.45);
+  --shadow-lg: 0 22px 60px rgba(0, 0, 0, 0.6);
+}
+
+:root[data-theme='neon-purple'] {
+  --bg: #0a0713;
+  --bg-2: #0f0a1c;
+  --surface: #120d20;
+  --surface-2: #171128;
+  --surface-3: #1d1631;
+  --border: #291f42;
+  --border-strong: #3a2c5a;
+  --brand-950: #08040f;
+  --brand-900: #100821;
+  --brand-800: #180c33;
+  --brand-700: #2c1466;
+  --brand-600: #8b5cf6;
+  --brand-500: #a175ff;
+  --brand-100: #261740;
+  --brand-50: #1b1130;
+  --gold-600: #e0aaff;
+  --gold-500: #e9c1ff;
+  --gold-400: #f3d9ff;
+  --gold-100: #2c1b3f;
+  --text: #f2eaff;
+  --text-2: #bdaede;
+  --text-3: #8f81b0;
+  --green: #4be3a4;
+  --green-bg: #0f2a22;
+  --red: #ff8b8b;
+  --red-bg: #34141a;
+  --amber: #f0c05e;
+  --amber-bg: #2e2312;
+  --blue: #8db8ff;
+  --blue-bg: #141f38;
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --shadow: 0 8px 26px rgba(0, 0, 0, 0.45);
+  --shadow-lg: 0 22px 60px rgba(0, 0, 0, 0.6);
+}
+
+:root[data-theme='neon-green'] {
+  --bg: #06120c;
+  --bg-2: #081711;
+  --surface: #0a1a13;
+  --surface-2: #0d2118;
+  --surface-3: #11291e;
+  --border: #1b3a2b;
+  --border-strong: #275039;
+  --brand-950: #040d08;
+  --brand-900: #06170f;
+  --brand-800: #082116;
+  --brand-700: #0c3d28;
+  --brand-600: #17c964;
+  --brand-500: #35d97c;
+  --brand-100: #12372a;
+  --brand-50: #0d241b;
+  --gold-600: #8ef0b8;
+  --gold-500: #a5f5c8;
+  --gold-400: #c6fbe0;
+  --gold-100: #123a2a;
+  --text: #e6fff2;
+  --text-2: #a7cdb9;
+  --text-3: #7ba190;
+  --green: #3ddc97;
+  --green-bg: #0c2a20;
+  --red: #ff8078;
+  --red-bg: #301513;
+  --amber: #f2c45f;
+  --amber-bg: #2b2310;
+  --blue: #7cc4e8;
+  --blue-bg: #102433;
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --shadow: 0 8px 26px rgba(0, 0, 0, 0.45);
+  --shadow-lg: 0 22px 60px rgba(0, 0, 0, 0.6);
+}
+
+/* Dark themes use the accent palette for soft buttons and headings. */
+:root:is([data-theme='dark'], [data-theme='dark-red'], [data-theme='dark-gold'], [data-theme='neon-blue'], [data-theme='neon-purple'], [data-theme='neon-green']) .btn-secondary {
+  color: var(--gold-400);
+}
+
+:root:is([data-theme='dark'], [data-theme='dark-red'], [data-theme='dark-gold'], [data-theme='neon-blue'], [data-theme='neon-purple'], [data-theme='neon-green']) .calc-preview {
+  background: var(--surface-3);
+  border-color: var(--border);
+}
+
+:root:is([data-theme='dark'], [data-theme='dark-red'], [data-theme='dark-gold'], [data-theme='neon-blue'], [data-theme='neon-purple'], [data-theme='neon-green']) .auth-name {
+  color: var(--gold-400);
+}
+
+:root:is([data-theme='dark'], [data-theme='dark-red'], [data-theme='dark-gold'], [data-theme='neon-blue'], [data-theme='neon-purple'], [data-theme='neon-green']) .settings-nav button.active {
+  background: var(--surface-3);
+  color: var(--gold-400);
+}

@@ -1,6 +1,7 @@
 import type { AuthUser, Bill, BillItem, BillPayment, BusinessSettings, CustomerSnapshot, DiscountType, Payment } from '../lib/types';
 import { computeBillTotals } from '../lib/pricing';
 import { billStatus } from '../lib/pricing';
+import { snapshotPayment } from '../lib/payment';
 import { round2, sum } from '../lib/money';
 import { uid } from '../lib/ids';
 import type { DataService } from './data';
@@ -94,6 +95,7 @@ export async function createBill(
     status: billStatus(totals.total, paid),
     payments: draft.payments,
     note: draft.note?.trim() || '',
+    payment: snapshotPayment(settings),
     version: 1,
     createdAt: now,
     updatedAt: now

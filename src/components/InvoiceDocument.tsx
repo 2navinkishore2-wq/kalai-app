@@ -1,6 +1,7 @@
 import type { Bill, BusinessSettings } from '../lib/types';
 import { formatDate, formatINR } from '../lib/format';
 import { logoSrc } from '../lib/logo';
+import { PaymentBlock } from './PaymentBlock';
 
 export function InvoiceDocument({ bill, settings }: { bill: Bill; settings: BusinessSettings }) {
   const showRate = settings.showRateOnInvoice;
@@ -94,6 +95,8 @@ export function InvoiceDocument({ bill, settings }: { bill: Bill; settings: Busi
         <div className="rowx"><span>Paid</span><span>{formatINR(bill.paid)}</span></div>
         <div className="rowx"><span>Balance</span><span>{formatINR(bill.balance)}</span></div>
       </div>
+
+      <PaymentBlock bill={bill} settings={settings} />
 
       {bill.payments.length > 0 ? (
         <div style={{ marginTop: 12, fontSize: 10, color: '#4a3a32' }}>

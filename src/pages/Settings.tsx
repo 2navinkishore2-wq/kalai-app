@@ -7,6 +7,7 @@ import {
   Languages,
   Palette,
   Printer,
+  QrCode,
   ReceiptText,
   RefreshCw,
   Save,
@@ -25,9 +26,10 @@ import { previewInvoiceNumber, validateInvoicePattern } from '../lib/invoiceNumb
 import { formatDateTime, formatINR } from '../lib/format';
 import { feedUrl } from '../lib/updates';
 import { platformLabel } from '../lib/platform';
+import { describePaymentChange, isValidBusinessMobile, isValidUpiId, paymentQrSrc, readPaymentQrFile } from '../lib/payment';
 import { Button, Card, Field, Input, Modal, PageHeader, SectionNote, Select, Tabs, useToast } from '../components/ui';
 
-type TabKey = 'business' | 'billing' | 'invoice' | 'workspace' | 'account' | 'data' | 'about';
+type TabKey = 'business' | 'billing' | 'invoice' | 'payment' | 'workspace' | 'account' | 'data' | 'about';
 
 export function SettingsPage() {
   const app = useApp();
@@ -44,17 +46,41 @@ export function SettingsPage() {
   const [restoreName, setRestoreName] = useState('');
   const [restoring, setRestoring] = useState(false);
   const [backupBusy, setBackupBusy] = useState(false);
+  const [qrError, setQrError] = useState('');
+  const [qrBusy, setQrBusy] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
+  const qrFileRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     setDraft(app.settings);
     setAllowedText((app.settings.access.allowedEmails || []).join('\n'));
+    setQrError('');
   }, [app.settings]);
 
   const canEdit = app.isOwner;
   const invoicePreview = useMemo(() => previewInvoiceNumber(draft.invoiceFormat, draft.invoicePrefix, draft.invoiceStart), [draft.invoiceFormat, draft.invoicePrefix, draft.invoiceStart]);
 
   const update = (patch: Partial<BusinessSettings>) => setDraft((d) => ({ ...d, ...patch }));
+
+  const updatePayment = (patch: Partial<BusinessSettings['payment']>) =>
+    setDraft((d) => ({ ...d, payment: { ...d.payment, ...patch } }));
+
+  const pickQr = async (file: File | null) => {
+    if (!file) return;
+    setQrBusy(true);
+    setQrError('');
+    try {
+      // Keeps the supplied QR pixels (only scaled, never redrawn) and stores a
+      // durable data URL with the account so Android and Windows agree.
+      const dataUrl = await readPaymentQrFile(file);
+      updatePayment({ qrImage: dataUrl });
+    } catch (e) {
+      setQrError((e as Error).message);
+    } finally {
+      setQrBusy(false);
+      if (qrFileRef.current) qrFileRef.current.value = '';
+    }
+  };
 
   const save = async () => {
     setError('');
@@ -66,6 +92,8 @@ export function SettingsPage() {
     if (!Number.isFinite(draft.invoiceStart) || draft.invoiceStart < 1) return setError('Invoice start number must be 1 or more.');
     if (!Number.isFinite(draft.gstRate) || draft.gstRate < 0 || draft.gstRate > 100) return setError('GST rate must be between 0 and 100.');
     if (draft.access.ownerEmail.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(draft.access.ownerEmail.trim())) return setError('Enter a valid owner email address.');
+    if (!isValidUpiId(draft.payment.upiId)) return setError('Enter a valid UPI ID such as name@bank, or leave it blank.');
+    if (!isValidBusinessMobile(draft.payment.businessMobile)) return setError('Enter a valid business mobile number, or leave it blank.');
     const allowed = allowedText.split(/[\n,]+/).map((e) => e.trim().toLowerCase()).filter(Boolean);
     for (const email of allowed) {
       if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return setError(`"${email}" is not a valid email address.`);
@@ -73,12 +101,13 @@ export function SettingsPage() {
     setSaving(true);
     try {
       const access = { ...draft.access, allowedEmails: [...new Set(allowed)] };
+      const paymentChange = describePaymentChange(app.settings.payment, draft.payment);
       await app.service.set('settings', 'business', { ...draft, id: 'business', access });
       await addAudit(app.service, app.user, {
         entity: 'settings',
         entityId: 'business',
         action: 'update',
-        summary: `Settings updated (${draft.language === 'ta' ? 'Tamil' : 'English'}, ${draft.theme} theme, GST ${draft.gstEnabled ? `${draft.gstRate}%` : 'off'})`
+        summary: `Settings updated (${draft.language === 'ta' ? 'Tamil' : 'English'}, ${draft.theme} theme, GST ${draft.gstEnabled ? `${draft.gstRate}%` : 'off'})${paymentChange.upiChanged ? ' · UPI ID changed' : ''}${paymentChange.qrChanged ? ' · payment QR changed' : ''}`
       });
       toast('Settings saved', 'success');
     } catch (e) {
@@ -203,6 +232,7 @@ export function SettingsPage() {
           { key: 'business', label: 'Business' },
           { key: 'billing', label: 'Billing & Tax' },
           { key: 'invoice', label: 'Invoice' },
+          { key: 'payment', label: 'Payment QR' },
           { key: 'workspace', label: 'Workspace' },
           { key: 'account', label: 'Account & Access' },
           { key: 'data', label: 'Backup & Data' },
@@ -336,14 +366,116 @@ export function SettingsPage() {
           </>
         ) : null}
 
+        {tab === 'payment' ? (
+          <>
+            <Card
+              title={<span><QrCode size={16} style={{ verticalAlign: -3, marginRight: 6 }} />Business &amp; payment details</span>}
+              subtitle="Printed on new invoices next to the Scan & Pay QR. Saved with this account."
+            >
+              <div className="input-row">
+                <Field label="Business mobile number" hint="Shown under the UPI ID. Optional.">
+                  <Input
+                    value={draft.payment.businessMobile}
+                    onChange={(e) => updatePayment({ businessMobile: e.target.value })}
+                    maxLength={20}
+                    inputMode="tel"
+                    placeholder="10-digit mobile number"
+                  />
+                </Field>
+                <Field label="UPI ID" hint="Exactly as registered, e.g. name@bank">
+                  <Input
+                    value={draft.payment.upiId}
+                    onChange={(e) => updatePayment({ upiId: e.target.value })}
+                    maxLength={120}
+                    autoComplete="off"
+                    placeholder="name@bank"
+                  />
+                </Field>
+              </div>
+              <div className="input-row" style={{ marginTop: 12 }}>
+                <Field label="Scan &amp; Pay QR">
+                  <label className="check" style={{ minHeight: 38 }}>
+                    <input type="checkbox" checked={draft.payment.showQr} onChange={(e) => updatePayment({ showQr: e.target.checked })} />
+                    Show the payment QR on invoices
+                  </label>
+                </Field>
+                <Field label="Payment method labels">
+                  <label className="check" style={{ minHeight: 38 }}>
+                    <input type="checkbox" checked={draft.payment.showLogos} onChange={(e) => updatePayment({ showLogos: e.target.checked })} />
+                    Show Google Pay, PhonePe, Paytm and BHIM labels
+                  </label>
+                </Field>
+              </div>
+              <div style={{ marginTop: 12 }}>
+                <Field label="Invoice payment footer" hint="One short line under the QR.">
+                  <Input value={draft.payment.footerMessage} onChange={(e) => updatePayment({ footerMessage: e.target.value })} maxLength={140} />
+                </Field>
+              </div>
+              <SectionNote tone="info">
+                These values are separate from the business identity fields, so changing an address, phone or theme never redirects payments. Existing bills keep the payment details they were issued with.
+              </SectionNote>
+            </Card>
+
+            <Card title="Payment QR image" subtitle="The original QR supplied by you — the app never creates or redraws one.">
+              <div className="qr-settings">
+                <div className="qr-settings-preview">
+                  {paymentQrSrc(draft.payment.qrImage) ? (
+                    <img src={paymentQrSrc(draft.payment.qrImage)} alt="Current payment QR" />
+                  ) : (
+                    <div className="qr-settings-empty">
+                      <QrCode size={26} />
+                      <b>Payment QR not configured</b>
+                      <span>The image slot is empty.</span>
+                    </div>
+                  )}
+                </div>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div className="btn-wrap">
+                    <Button variant="secondary" onClick={() => qrFileRef.current?.click()} loading={qrBusy}>
+                      <Upload size={15} /> {draft.payment.qrImage ? 'Replace QR image' : 'Upload QR image'}
+                    </Button>
+                    {draft.payment.qrImage ? (
+                      <Button variant="ghost" onClick={() => updatePayment({ qrImage: '' })} disabled={qrBusy}>
+                        <Trash2 size={15} /> Remove
+                      </Button>
+                    ) : null}
+                  </div>
+                  <input
+                    ref={qrFileRef}
+                    type="file"
+                    accept="image/png,image/jpeg,image/webp"
+                    style={{ display: 'none' }}
+                    onChange={(e) => void pickQr(e.target.files?.[0] || null)}
+                  />
+                  <div className="muted small" style={{ marginTop: 8, lineHeight: 1.55 }}>
+                    PNG, JPG or WebP up to 6 MB. The image is stored with this account, so the same QR appears on Android and Windows.
+                    Nothing is uploaded until you press Save changes.
+                  </div>
+                  {qrError ? <div className="form-error" style={{ marginTop: 6 }}>{qrError}</div> : null}
+                </div>
+              </div>
+              <SectionNote tone="warn">
+                Upload the QR issued by your own payment provider. Scanning it does not confirm that money was received, and the invoice says so.
+              </SectionNote>
+            </Card>
+          </>
+        ) : null}
+
         {tab === 'workspace' ? (
           <>
             <Card title={<span><Palette size={16} style={{ verticalAlign: -3, marginRight: 6 }} />Appearance</span>} subtitle="The interface supports light and dark modes and full Tamil labels.">
               <div className="input-row">
                 <Field label="Theme">
                   <Select value={draft.theme} onChange={(e) => update({ theme: e.target.value as ThemeMode })}>
-                    <option value="light">Light — cream & burgundy</option>
+                    <option value="light">Light — cream &amp; burgundy</option>
                     <option value="dark">Dark — deep burgundy</option>
+                    <option value="clean-white">Clean White — bright &amp; neutral</option>
+                    <option value="modern-blue">Modern Blue — light with blue</option>
+                    <option value="dark-gold">Dark Gold — black &amp; gold</option>
+                    <option value="dark-red">Dark Red — charcoal &amp; crimson</option>
+                    <option value="neon-blue">Neon Blue — midnight &amp; electric blue</option>
+                    <option value="neon-purple">Neon Purple — midnight &amp; violet</option>
+                    <option value="neon-green">Neon Green — forest &amp; mint</option>
                   </Select>
                 </Field>
                 <Field label="Language">
