@@ -35,8 +35,14 @@ export function LoginPage() {
     } catch (e) {
       const msg = (e as Error).message || String(e);
       if (/cancel/i.test(msg)) setError('Sign-in was cancelled.');
+      else if (/developer_error|signing certificate is not registered/i.test(msg))
+        setError(
+          'Google sign-in is not authorised for this APK yet. The app\u2019s signing SHA-1 must be registered on the Android app in Firebase → Project settings → Your apps. Settings → About & Updates shows the exact fingerprint.'
+        );
+      else if (/no google account/i.test(msg)) setError('No Google account found on this device. Add one in Android Settings, then try again.');
       else if (/unauthorized-domain/i.test(msg)) setError('This domain is not authorised in Firebase Authentication → Settings → Authorized domains.');
       else if (/configuration-not-found|operation-not-allowed/i.test(msg)) setError('Google sign-in is not enabled in this Firebase project.');
+      else if (/VITE_GOOGLE_WEB_CLIENT_ID/.test(msg)) setError(msg);
       else setError(msg);
     } finally {
       setBusy(false);

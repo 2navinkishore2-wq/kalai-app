@@ -442,10 +442,19 @@ assets above to each.
 ```
 
 Installed apps read
-`https://github.com/2navinkishore2-wq/kalai-app-releases/releases/latest/download/latest.json`,
-which always redirects to the newest published release — so no app update is needed to point at a
-new version. The feed can be overridden for testing with
-`localStorage['kalai:update-feed:v1'] = '<feed url>'` or the `VITE_UPDATE_FEED` build variable.
+`https://raw.githubusercontent.com/2navinkishore2-wq/kalai-app-releases/main/latest.json`
+(canonical — served with `Access-Control-Allow-Origin: *`, no token, no API quota), and fall back
+to `https://github.com/2navinkishore2-wq/kalai-app-releases/releases/latest/download/latest.json`
+if the first request fails. `scripts/publish-release.cjs` commits `latest.json` to the public
+repository's `main` branch on every release, so the feed always tracks the newest version. The
+feed can be overridden for testing with `localStorage['kalai:update-feed:v1'] = '<feed url>'` or
+the `VITE_UPDATE_FEED` build variable.
+
+> **Signing:** releases from 1.5.0 are signed with `android/kalai-release.jks`
+> (`android/keystore.properties`, both git-ignored — back them up; losing the key means a future
+> APK cannot upgrade in place). Its SHA-1 is `5B:6B:AE:01:5D:21:0F:FB:77:88:B4:A8:83:CB:AB:0F:17:E4:DC:9F`
+> and must be registered in Firebase → Project settings → Your apps for Android Google Sign-In.
+> `npm run build` embeds it (`ANDROID_SHA1=…`) so Settings → About & Updates can display it.
 
 ### 14.6 How the updater behaves
 

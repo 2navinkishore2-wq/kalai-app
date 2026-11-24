@@ -13,7 +13,6 @@ import { CustomerDetailPage } from './pages/CustomerDetail';
 import { ProductsPage } from './pages/Products';
 import { PaymentsPage } from './pages/Payments';
 import { ExpensesPage } from './pages/Expenses';
-import { InventoryPage } from './pages/Inventory';
 import { ReportsPage } from './pages/Reports';
 import { SettingsPage } from './pages/Settings';
 import { AboutPage } from './pages/About';
@@ -56,7 +55,6 @@ function Shell() {
           <Route path="/products" element={<ProductsPage />} />
           <Route path="/payments" element={<PaymentsPage />} />
           <Route path="/expenses" element={<ExpensesPage />} />
-          <Route path="/inventory" element={<InventoryPage />} />
           <Route path="/reports" element={<ReportsPage />} />
           <Route path="/settings" element={<SettingsPage />} />
           <Route path="/about" element={<AboutPage />} />

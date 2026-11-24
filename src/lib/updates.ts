@@ -31,23 +31,36 @@ export interface UpdateResult {
   status: UpdateStatus;
   currentVersion: string;
   release?: ReleaseInfo;
+  /** Friendly, user-facing explanation (never a raw fetch error). */
   message?: string;
+  /** Technical detail for the console log only. */
+  detail?: string;
   checkedAt?: string;
 }
 
 export type UpdatePlatform = 'android' | 'windows' | 'web';
 
+export const RELEASES_REPO = '2navinkishore2-wq/kalai-app-releases';
+
 /**
- * Public release feed. Kept as a plain "latest download" URL so an installed
- * app needs no GitHub token, no login and no API quota: the URL redirects to
- * the newest published `latest.json`.
+ * Public release feed.
+ *
+ * The canonical source is `raw.githubusercontent.com`, which serves the file
+ * with `Access-Control-Allow-Origin: *` — required by the Android WebView and
+ * the Electron renderer — and needs no GitHub token, login or API quota. The
+ * `releases/latest/download` URL is kept as a fallback because it always
+ * points at the newest published release.
  */
-export const DEFAULT_FEED_URL =
-  'https://github.com/2navinkishore2-wq/kalai-app-releases/releases/latest/download/latest.json';
+export const DEFAULT_FEED_URL = `https://raw.githubusercontent.com/${RELEASES_REPO}/main/latest.json`;
+
+export const FALLBACK_FEED_URL = `https://github.com/${RELEASES_REPO}/releases/latest/download/latest.json`;
 
 /** Human-readable release page, used when a browser fallback is needed. */
-export const DEFAULT_RELEASE_PAGE =
-  'https://github.com/2navinkishore2-wq/kalai-app-releases/releases/latest';
+export const DEFAULT_RELEASE_PAGE = `https://github.com/${RELEASES_REPO}/releases/latest`;
+
+/** Friendly copy shown when the feed cannot be reached. */
+export const OFFLINE_CHECK_MESSAGE =
+  'Unable to check for updates. Please check your internet connection and try again.';
 
 const FEED_OVERRIDE_KEY = 'kalai:update-feed:v1';
 
@@ -172,9 +185,22 @@ export function assetForPlatform(release: ReleaseInfo | undefined, platform: Upd
 interface CheckOptions {
   currentVersion?: string;
   feedUrl?: string;
+  /** Extra feed URLs tried in order when the first one fails. */
+  fallbackUrls?: string[];
   fetchImpl?: typeof fetch;
   online?: boolean;
   timeoutMs?: number;
+}
+
+function technicalDetail(error: unknown): string {
+  const err = error as { name?: string; message?: string } | undefined;
+  if (!err) return 'unknown error';
+  return `${err.name || 'Error'}: ${err.message || String(error)}`;
+}
+
+/** A network/CORS failure reads as "Failed to fetch" — never shown verbatim. */
+function isNetworkFailure(message: string): boolean {
+  return /failed to fetch|networkerror|network request failed|load failed|err_|net::|timeout|abort/i.test(message);
 }
 
 /**
@@ -199,42 +225,60 @@ export async function checkForUpdates(options: CheckOptions = {}): Promise<Updat
     return { status: 'error', currentVersion, message: 'This device cannot check for updates.' };
   }
 
-  const controller = typeof AbortController === 'function' ? new AbortController() : null;
-  const timer = controller ? setTimeout(() => controller.abort(), options.timeoutMs ?? 12000) : null;
+  const primary = options.feedUrl || feedUrl();
+  const sources = [primary, ...(options.fallbackUrls ?? (options.feedUrl ? [] : [FALLBACK_FEED_URL]))].filter(
+    (url, index, list) => url && list.indexOf(url) === index
+  );
 
-  try {
-    const response = await doFetch(options.feedUrl || feedUrl(), {
-      method: 'GET',
-      cache: 'no-store',
-      headers: { Accept: 'application/json' },
-      signal: controller ? controller.signal : undefined
-    });
-    if (!response.ok) {
-      return { status: 'error', currentVersion, message: `Update feed returned ${response.status}.` };
+  let lastDetail = '';
+  let lastStatusMessage = '';
+
+  for (const url of sources) {
+    const controller = typeof AbortController === 'function' ? new AbortController() : null;
+    const timer = controller ? setTimeout(() => controller.abort(), options.timeoutMs ?? 12000) : null;
+    try {
+      const response = await doFetch(url, {
+        method: 'GET',
+        cache: 'no-store',
+        redirect: 'follow',
+        headers: { Accept: 'application/json' },
+        signal: controller ? controller.signal : undefined
+      });
+      if (!response.ok) {
+        lastDetail = `HTTP ${response.status} from ${url}`;
+        lastStatusMessage =
+          response.status === 404
+            ? 'The update feed is not published yet. Please try again later or download the installer from the release page.'
+            : 'Unable to check for updates. Please try again in a moment.';
+        continue;
+      }
+      const payload = await response.json();
+      const release = parseRelease(payload);
+      if (!release) {
+        lastDetail = `Feed did not contain a usable release: ${url}`;
+        lastStatusMessage = 'The update feed is temporarily unavailable. Please try again later.';
+        continue;
+      }
+      const checkedAt = new Date().toISOString();
+      if (isNewerVersion(release.version, currentVersion)) {
+        return { status: 'available', currentVersion, release, checkedAt };
+      }
+      return { status: 'current', currentVersion, release, checkedAt };
+    } catch (error) {
+      lastDetail = `${technicalDetail(error)} (${url})`;
+      lastStatusMessage = OFFLINE_CHECK_MESSAGE;
+    } finally {
+      if (timer) clearTimeout(timer);
     }
-    const payload = await response.json();
-    const release = parseRelease(payload);
-    if (!release) {
-      return { status: 'error', currentVersion, message: 'The update feed did not list a usable installer.' };
-    }
-    const checkedAt = new Date().toISOString();
-    if (isNewerVersion(release.version, currentVersion)) {
-      return { status: 'available', currentVersion, release, checkedAt };
-    }
-    return { status: 'current', currentVersion, release, checkedAt };
-  } catch (error) {
-    const message =
-      (error as Error)?.name === 'AbortError'
-        ? 'The update check timed out.'
-        : (error as Error)?.message || 'The update check failed.';
-    return {
-      status: online ? 'error' : 'offline',
-      currentVersion,
-      message: online ? message : 'No internet connection.'
-    };
-  } finally {
-    if (timer) clearTimeout(timer);
   }
+
+  const network = isNetworkFailure(lastDetail);
+  return {
+    status: online ? 'error' : 'offline',
+    currentVersion,
+    message: network ? OFFLINE_CHECK_MESSAGE : lastStatusMessage || OFFLINE_CHECK_MESSAGE,
+    detail: lastDetail
+  };
 }
 
 /** Opens a URL outside the app: system browser on Android, desktop browser on the web. */

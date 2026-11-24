@@ -62,6 +62,10 @@ export function UpdateProvider({ children }: { children: ReactNode }) {
   const check = useCallback(async (manual = false) => {
     setResult((prev) => ({ ...prev, status: 'checking', message: undefined }));
     const next = await checkForUpdates({ currentVersion: version });
+    if (next.detail) {
+      // Kept for diagnosis only; the dialog shows friendly copy instead.
+      console.warn('[KALAI updates]', next.detail);
+    }
     setResult(next);
     if (manual) {
       setManualOpen(true);
@@ -244,8 +248,14 @@ export function UpdateStatusMessage({ result, onRetry }: { result: UpdateResult;
   if (result.status === 'error') {
     return (
       <SectionNote tone="danger">
-        {result.message || 'The update check failed.'}
+        {result.message || 'Unable to check for updates. Please check your internet connection and try again.'}
         <div style={{ marginTop: 8 }}><Button size="sm" variant="secondary" onClick={onRetry}>Try again</Button></div>
+        {result.detail ? (
+          <details style={{ marginTop: 8 }}>
+            <summary style={{ cursor: 'pointer', fontSize: 11 }}>Technical details</summary>
+            <div className="mono" style={{ fontSize: 10.5, marginTop: 4, wordBreak: 'break-all' }}>{result.detail}</div>
+          </details>
+        ) : null}
       </SectionNote>
     );
   }

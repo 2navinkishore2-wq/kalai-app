@@ -15,7 +15,7 @@ const FEATURES = [
   'Unique bill numbers with an offline-safe counter',
   'Edit, cancel, reprint and audit every bill',
   'Customer profiles where the mobile number is optional',
-  'Payments, expenses and optional material inventory',
+  'Payments and expenses with full history',
   'Real reports with PDF and CSV export',
   'A4 invoice printing and 58/80 mm thermal receipts',
   'English and Tamil interface, light and dark themes',
@@ -117,7 +117,6 @@ export function AboutPage() {
           <div className="kv"><span>Customers</span><b>{app.customers.length}</b></div>
           <div className="kv"><span>Payments</span><b>{app.payments.length}</b></div>
           <div className="kv"><span>Expenses</span><b>{app.expenses.length}</b></div>
-          <div className="kv"><span>Materials</span><b>{app.inventory.length}</b></div>
           <div className="kv"><span>Audit entries</span><b>{app.auditLogs.length}</b></div>
           <div className="muted small" style={{ marginTop: 8 }}>Storage: {app.mode === 'cloud' ? 'users/{account}/apps/kalai in Firestore' : 'Device-local storage'}</div>
         </Card>

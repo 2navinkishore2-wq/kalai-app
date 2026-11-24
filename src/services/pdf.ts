@@ -5,6 +5,7 @@ import { formatDate } from '../lib/format';
 import { absoluteAssetUrl, paymentMobile, paymentSnapshotFor } from '../lib/payment';
 import { isNative } from '../lib/platform';
 import { saveFile } from './download';
+import { pdfSplitTextToSize, pdfText, tableCellForTamil } from './pdfText';
 
 const BRAND: [number, number, number] = [122, 18, 32];
 const GOLD: [number, number, number] = [168, 124, 29];
@@ -123,7 +124,8 @@ function drawPaymentBlock(
   ty += 5.5;
   doc.setFontSize(11);
   doc.setTextColor(...BRAND);
-  doc.text(payment.payeeName || 'KALAI DIGITAL', textX, ty);
+  pdfText(doc, payment.payeeName || 'KALAI DIGITAL', textX, ty);
+  doc.setFont('helvetica', 'normal');
 
   doc.setFont('courier', 'normal');
   doc.setFontSize(8.2);
@@ -147,7 +149,8 @@ function drawPaymentBlock(
   }
   if (payment.footerMessage) {
     ty += 4.2;
-    doc.text(doc.splitTextToSize(payment.footerMessage, right - textX - pad) as string[], textX, ty);
+    const messageLines = pdfSplitTextToSize(doc, payment.footerMessage, right - textX - pad);
+    messageLines.forEach((line, index) => pdfText(doc, line, textX, ty + index * 3.4));
   }
 
   doc.setFontSize(6.3);
@@ -181,26 +184,26 @@ export function buildInvoicePdf(bill: Bill, settings: BusinessSettings, qr: QrIm
   doc.setTextColor(...BRAND);
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(17);
-  doc.text(settings.nameEn || 'KALAI DIGITAL', left, 16);
+  pdfText(doc, settings.nameEn || 'KALAI DIGITAL', left, 16);
 
   doc.setTextColor(...MUTED);
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(8.5);
   let brandY = 21;
   if (settings.nameTa) {
-    doc.text(settings.nameTa, left, brandY);
+    pdfText(doc, settings.nameTa, left, brandY);
     brandY += 4.2;
   }
   if (settings.tagline) {
-    doc.text(settings.tagline, left, brandY);
+    pdfText(doc, settings.tagline, left, brandY);
     brandY += 4;
   }
   const contact = [settings.address, settings.phone ? `Phone: ${settings.phone}` : '', settings.email, settings.gstin ? `GSTIN: ${settings.gstin}` : '']
     .filter(Boolean)
     .join('  |  ');
   if (contact) {
-    const lines = doc.splitTextToSize(contact, 108) as string[];
-    doc.text(lines, left, brandY);
+    const lines = pdfSplitTextToSize(doc, contact, 108);
+    lines.forEach((line, index) => pdfText(doc, line, left, brandY + index * 3.8));
   }
 
   doc.setTextColor(...INK);
@@ -232,15 +235,15 @@ export function buildInvoicePdf(bill: Bill, settings: BusinessSettings, qr: QrIm
 
   doc.setTextColor(...INK);
   doc.setFontSize(10);
-  doc.text(bill.customer.name || 'Walk-in Customer', left, partyY + 5.5);
+  pdfText(doc, bill.customer.name || 'Walk-in Customer', left, partyY + 5.5);
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(8.5);
   doc.setTextColor(...MUTED);
   let partyLineY = partyY + 10;
   const partyLines = [bill.customer.phone, bill.customer.address, bill.customer.email].filter(Boolean) as string[];
   for (const line of partyLines) {
-    const wrapped = doc.splitTextToSize(line, 100) as string[];
-    doc.text(wrapped, left, partyLineY);
+    const wrapped = pdfSplitTextToSize(doc, line, 100);
+    wrapped.forEach((wrappedLine, index) => pdfText(doc, wrappedLine, left, partyLineY + index * 4));
     partyLineY += wrapped.length * 4;
   }
 
@@ -293,7 +296,13 @@ export function buildInvoicePdf(bill: Bill, settings: BusinessSettings, qr: QrIm
     styles: { font: 'helvetica', fontSize: 8.2, textColor: INK, lineColor: [234, 223, 210], lineWidth: 0.2, cellPadding: 2.2, valign: 'top' },
     headStyles: { fillColor: BRAND, textColor: [255, 255, 255], fontStyle: 'bold', fontSize: 8 },
     alternateRowStyles: { fillColor: [252, 247, 240] },
-    columnStyles
+    columnStyles,
+    didParseCell: (data) => {
+      tableCellForTamil(doc, data.cell.raw, (font, lines) => {
+        data.cell.styles.font = font;
+        data.cell.text = lines;
+      });
+    }
   });
 
   type WithFinalY = jsPDF & { lastAutoTable?: { finalY: number } };
@@ -334,14 +343,14 @@ export function buildInvoicePdf(bill: Bill, settings: BusinessSettings, qr: QrIm
   if (bill.payments.length > 0) {
     doc.setTextColor(...MUTED);
     const payments = bill.payments.map((p) => `${p.method} ${pdfMoney(p.amount)} on ${formatDate(p.date)}`).join('  |  ');
-    const lines = doc.splitTextToSize(`Payments: ${payments}`, 118) as string[];
-    doc.text(lines, left, noteYActual);
+    const lines = pdfSplitTextToSize(doc, `Payments: ${payments}`, 118);
+    lines.forEach((line, index) => pdfText(doc, line, left, noteYActual + index * 4));
     noteYActual += lines.length * 4;
   }
   if (bill.note) {
     doc.setTextColor(...MUTED);
-    const lines = doc.splitTextToSize(`Note: ${bill.note}`, 118) as string[];
-    doc.text(lines, left, noteYActual);
+    const lines = pdfSplitTextToSize(doc, `Note: ${bill.note}`, 118);
+    lines.forEach((line, index) => pdfText(doc, line, left, noteYActual + index * 4));
     noteYActual += lines.length * 4;
   }
 
@@ -364,19 +373,19 @@ export function buildInvoicePdf(bill: Bill, settings: BusinessSettings, qr: QrIm
   doc.setTextColor(...GOLD);
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(8.5);
-  doc.text(settings.invoiceFooter || 'Thank you for your business!', left, footerY);
+  pdfText(doc, settings.invoiceFooter || 'Thank you for your business!', left, footerY);
   doc.setTextColor(...MUTED);
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(7);
-  const terms = doc.splitTextToSize(settings.terms || '', 180) as string[];
-  doc.text(terms.slice(0, 2), left, footerY + 4.2);
+  const terms = pdfSplitTextToSize(doc, settings.terms || '', 180);
+  terms.slice(0, 2).forEach((line, index) => pdfText(doc, line, left, footerY + 4.2 + index * 3.4));
 
   const pages = doc.getNumberOfPages();
   for (let p = 1; p <= pages; p += 1) {
     doc.setPage(p);
     doc.setTextColor(...MUTED);
     doc.setFontSize(7);
-    doc.text(`${settings.nameEn || 'KALAI DIGITAL'}  ·  ${bill.number}`, left, 292);
+    pdfText(doc, `${settings.nameEn || 'KALAI DIGITAL'}  ·  ${bill.number}`, left, 292);
     doc.text(`Page ${p} of ${pages}`, right, 292, { align: 'right' });
   }
 
@@ -406,22 +415,23 @@ export function buildReportPdf(title: string, subtitle: string, sections: Report
   doc.setTextColor(...BRAND);
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(16);
-  doc.text(settings?.nameEn || 'KALAI DIGITAL', left, 16);
+  pdfText(doc, settings?.nameEn || 'KALAI DIGITAL', left, 16);
   doc.setFontSize(8.5);
   doc.setTextColor(...MUTED);
   doc.setFont('helvetica', 'normal');
-  if (settings?.nameTa) doc.text(settings.nameTa, left, 21);
-  if (settings?.phone || settings?.address) doc.text([settings?.address, settings?.phone].filter(Boolean).join('  |  '), left, settings?.nameTa ? 25 : 21);
+  if (settings?.nameTa) pdfText(doc, settings.nameTa, left, 21);
+  const reportContact = [settings?.address, settings?.phone].filter(Boolean).join('  |  ');
+  if (reportContact) pdfText(doc, reportContact, left, settings?.nameTa ? 25 : 21);
 
   doc.setTextColor(...INK);
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(13);
-  doc.text(title, right, 16, { align: 'right' });
+  pdfText(doc, title, right, 16, { align: 'right' });
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(8.5);
   doc.setTextColor(...MUTED);
-  const subtitleLines = doc.splitTextToSize(subtitle, 80) as string[];
-  doc.text(subtitleLines, right, 21, { align: 'right' });
+  const subtitleLines = pdfSplitTextToSize(doc, subtitle, 80);
+  subtitleLines.forEach((line, index) => pdfText(doc, line, right, 21 + index * 4, { align: 'right' }));
 
   let y = Math.max(34, 21 + subtitleLines.length * 4 + 6);
   for (const section of sections) {
@@ -432,7 +442,7 @@ export function buildReportPdf(title: string, subtitle: string, sections: Report
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(9.5);
     doc.setTextColor(...BRAND);
-    doc.text(section.title, left, y);
+    pdfText(doc, section.title, left, y);
     y += 2;
 
     autoTable(doc, {
@@ -444,7 +454,13 @@ export function buildReportPdf(title: string, subtitle: string, sections: Report
       styles: { font: 'helvetica', fontSize: 7.8, textColor: INK, lineColor: [234, 223, 210], lineWidth: 0.2, cellPadding: 1.8 },
       headStyles: { fillColor: BRAND, textColor: [255, 255, 255], fontStyle: 'bold', fontSize: 7.8 },
       alternateRowStyles: { fillColor: [252, 247, 240] },
-      columnStyles: Object.fromEntries((section.numericColumns || []).map((i) => [i, { halign: 'right' as const }]))
+      columnStyles: Object.fromEntries((section.numericColumns || []).map((i) => [i, { halign: 'right' as const }])),
+      didParseCell: (data) => {
+        tableCellForTamil(doc, data.cell.raw, (font, lines) => {
+          data.cell.styles.font = font;
+          data.cell.text = lines;
+        });
+      }
     });
     type WithFinalY = jsPDF & { lastAutoTable?: { finalY: number } };
     y = ((doc as WithFinalY).lastAutoTable?.finalY || y) + 6;
@@ -454,10 +470,10 @@ export function buildReportPdf(title: string, subtitle: string, sections: Report
         doc.setFont('helvetica', 'normal');
         doc.setFontSize(8);
         doc.setTextColor(...MUTED);
-        doc.text(label, right - 48, y);
+        pdfText(doc, label, right - 48, y);
         doc.setFont('helvetica', 'bold');
         doc.setTextColor(...INK);
-        doc.text(value, right, y, { align: 'right' });
+        pdfText(doc, value, right, y, { align: 'right' });
         y += 4.5;
       }
       y += 2;

@@ -53,6 +53,20 @@ export async function signInWithNativeGoogle(): Promise<NativeGoogleUser> {
     if (e instanceof NativeGoogleSignInError) throw e;
     const msg = e instanceof Error ? e.message : String(e);
     if (/cancel/i.test(msg)) throw new NativeGoogleSignInError('Google sign-in was cancelled.', 'CANCELLED');
+    // Credential Manager rejects an app whose signing certificate is not
+    // registered on the Android OAuth client (Google surfaces this as 10).
+    if (/developer_error|\b10\b|28444|apiexception: 10/i.test(msg)) {
+      throw new NativeGoogleSignInError(
+        'This APK\u2019s signing certificate is not registered for Google sign-in. Add the app\u2019s SHA-1 fingerprint to the Android app in Firebase (Project settings \u2192 Your apps).',
+        'DEVELOPER_ERROR'
+      );
+    }
+    if (/no credential|no_credential|no accounts/i.test(msg)) {
+      throw new NativeGoogleSignInError(
+        'No Google account is available on this device. Add a Google account in Android Settings, then try again.',
+        'NO_CREDENTIAL'
+      );
+    }
     throw new NativeGoogleSignInError(`Native Google sign-in failed: ${msg}`, 'FAILED');
   }
 }

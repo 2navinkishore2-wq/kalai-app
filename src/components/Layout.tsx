@@ -13,7 +13,6 @@ import {
   WifiOff,
   WalletCards,
   TrendingDown,
-  Boxes,
   BarChart3,
   Info
 } from 'lucide-react';
@@ -31,7 +30,6 @@ const NAV = [
   { to: '/products', labelKey: 'products', fallback: 'Products & Rates', icon: SlidersHorizontal, end: true },
   { to: '/payments', labelKey: 'payments', fallback: 'Payments', icon: WalletCards, end: true },
   { to: '/expenses', labelKey: 'expenses', fallback: 'Expenses', icon: TrendingDown, end: true },
-  { to: '/inventory', labelKey: 'inventory', fallback: 'Inventory', icon: Boxes, end: true },
   { to: '/reports', labelKey: 'reports', fallback: 'Reports', icon: BarChart3, end: true },
   { to: '/settings', labelKey: 'settings', fallback: 'Settings', icon: Settings, end: true }
 ];
@@ -69,9 +67,9 @@ export function Layout({ children }: { children: ReactNode }) {
           <div className="nav-section">Workspace</div>
           {navItems(NAV.slice(0, 4))}
           <div className="nav-section">Management</div>
-          {navItems(NAV.slice(4, 9))}
+          {navItems(NAV.slice(4, 8))}
           <div className="nav-section">System</div>
-          {navItems(NAV.slice(9))}
+          {navItems(NAV.slice(8))}
         </nav>
         <div className="sidebar-foot">
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, marginBottom: 10 }}>

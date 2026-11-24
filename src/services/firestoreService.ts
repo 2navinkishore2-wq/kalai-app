@@ -3,9 +3,7 @@ import {
   getAuth,
   GoogleAuthProvider,
   signInWithPopup,
-  signInWithRedirect,
   signInWithCredential,
-  getRedirectResult,
   onAuthStateChanged,
   signOut as fbSignOut,
   connectAuthEmulator,
@@ -44,7 +42,7 @@ import type { AuthUser, SyncStatus } from '../lib/types';
 import { formatBillNumber, parseBillSequence } from '../lib/invoiceNumber';
 import type { DataService, QuerySpec } from './data';
 import { isNative } from '../lib/platform';
-import { signInWithNativeGoogle, signOutNativeGoogle, isNativeGoogleConfigured, NativeGoogleSignInError } from '../lib/nativeGoogle';
+import { signInWithNativeGoogle, signOutNativeGoogle, isNativeGoogleConfigured } from '../lib/nativeGoogle';
 
 export interface FirebaseConfig {
   apiKey: string;
@@ -191,7 +189,6 @@ export class FirestoreDataService implements DataService {
       this.authListeners.forEach((cb) => cb(this.authUser));
       if (authUser) void this.ensureUserDoc(authUser);
     });
-    if (isNative()) getRedirectResult(auth).catch(() => undefined);
   }
 
   private toAuthUser(user: FirebaseUser): AuthUser {
@@ -210,41 +207,19 @@ export class FirestoreDataService implements DataService {
     provider.setCustomParameters({ prompt: 'select_account' });
 
     if (isNative()) {
-      let nativeErr: string | null = null;
-      if (isNativeGoogleConfigured()) {
-        try {
-          const { idToken } = await signInWithNativeGoogle();
-          const cred = GoogleAuthProvider.credential(idToken);
-          const result = await signInWithCredential(auth, cred);
-          return this.toAuthUser(result.user);
-        } catch (e) {
-          if (e instanceof NativeGoogleSignInError && e.code === 'CANCELLED') throw e;
-          nativeErr = (e as Error).message || String(e);
-        }
+      // Android must use the on-device Google account chooser (Credential
+      // Manager). The old redirect fallback opened Chrome and dead-ended, so
+      // it is deliberately removed: without the native path we fail with an
+      // actionable message instead of a browser round-trip.
+      if (!isNativeGoogleConfigured()) {
+        throw new Error(
+          'Android Google sign-in is not configured in this build. Add VITE_GOOGLE_WEB_CLIENT_ID to .env and rebuild the APK.'
+        );
       }
-      try {
-        await signInWithRedirect(auth, provider);
-        return await new Promise<AuthUser>((resolve, reject) => {
-          let timer: ReturnType<typeof setTimeout> | undefined;
-          const unsub = onAuthStateChanged(auth, (u) => {
-            if (u) {
-              if (timer) clearTimeout(timer);
-              unsub();
-              resolve(this.toAuthUser(u));
-            }
-          });
-          timer = setTimeout(() => {
-            unsub();
-            reject(new Error('sign-in-was-cancelled'));
-          }, 30000);
-          if (typeof (timer as unknown as { unref?: () => void }).unref === 'function') {
-            (timer as unknown as { unref: () => void }).unref();
-          }
-        });
-      } catch (e) {
-        const redirectErr = (e as Error).message || String(e);
-        throw new Error(nativeErr ? `[native-google] ${nativeErr} | [redirect] ${redirectErr}` : `[redirect] ${redirectErr}`);
-      }
+      const { idToken } = await signInWithNativeGoogle();
+      const cred = GoogleAuthProvider.credential(idToken);
+      const result = await signInWithCredential(auth, cred);
+      return this.toAuthUser(result.user);
     }
     const cred = await signInWithPopup(auth, provider);
     return this.toAuthUser(cred.user);

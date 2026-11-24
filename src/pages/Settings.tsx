@@ -12,7 +12,6 @@ import {
   RefreshCw,
   Save,
   ShieldCheck,
-  SlidersHorizontal,
   Trash2,
   Upload
 } from 'lucide-react';
@@ -205,7 +204,6 @@ export function SettingsPage() {
     ['Customers', app.customers.length],
     ['Payments', app.payments.length],
     ['Expenses', app.expenses.length],
-    ['Materials', app.inventory.length],
     ['Audit entries', app.auditLogs.length]
   ] as const;
 
@@ -488,22 +486,6 @@ export function SettingsPage() {
               <div className="muted small"><Languages size={13} style={{ verticalAlign: -2, marginRight: 4 }} />Tamil labels appear throughout the navigation and dashboard. Invoice content keeps the names you enter.</div>
             </Card>
 
-            <Card title={<span><SlidersHorizontal size={16} style={{ verticalAlign: -3, marginRight: 6 }} />Operations</span>} subtitle="Optional features. Billing works without them.">
-              <div className="stack" style={{ gap: 10 }}>
-                <label className="check">
-                  <input type="checkbox" checked={draft.inventoryEnabled} onChange={(e) => update({ inventoryEnabled: e.target.checked })} />
-                  Enable inventory tracking and low-stock alerts
-                </label>
-                <label className="check">
-                  <input type="checkbox" checked={draft.allowNegativeStock} onChange={(e) => update({ allowNegativeStock: e.target.checked })} />
-                  Allow stock to go negative (not recommended)
-                </label>
-                <label className="check">
-                  <input type="checkbox" checked={draft.lowStockAlerts} onChange={(e) => update({ lowStockAlerts: e.target.checked })} />
-                  Show low-stock warnings on the dashboard
-                </label>
-              </div>
-            </Card>
           </>
         ) : null}
 
@@ -638,6 +620,7 @@ export function SettingsPage() {
  */
 function AboutUpdatesCard() {
   const { version, platform, result, check, install, installing, installMessage } = useUpdates();
+  const ANDROID_SHA1 = typeof __ANDROID_SHA1__ === 'string' ? __ANDROID_SHA1__ : '';
 
   return (
     <>
@@ -650,6 +633,16 @@ function AboutUpdatesCard() {
           The release feed returns only the newest stable version and its installers. No account data, bill or customer detail is ever sent when checking.
         </SectionNote>
       </Card>
+
+      {ANDROID_SHA1 ? (
+        <Card title="Android signing" subtitle="Used for Google Sign-In and in-place APK updates.">
+          <div className="kv"><span>Certificate SHA-1</span><b className="mono" style={{ fontSize: 11, wordBreak: 'break-all' }}>{ANDROID_SHA1}</b></div>
+          <SectionNote tone="info">
+            This fingerprint must be registered on the Android app in Firebase (Project settings → Your apps → Add fingerprint) before
+            Google Sign-In can work on Android. Without it Google returns a configuration error instead of the account chooser.
+          </SectionNote>
+        </Card>
+      ) : null}
 
       <Card title={<span><RefreshCw size={16} style={{ verticalAlign: -3, marginRight: 6 }} />Updates</span>} subtitle="Checked automatically when the app opens. You can also check now.">
         <div className="row" style={{ gap: 8, flexWrap: 'wrap', marginBottom: 12 }}>

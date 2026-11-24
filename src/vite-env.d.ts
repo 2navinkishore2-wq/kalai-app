@@ -5,6 +5,8 @@ import type { UpdatePlatform } from './lib/updates';
 declare global {
   /** Injected by Vite from package.json `version` (see vite.config.ts). */
   const __APP_VERSION__: string;
+  /** Android signing certificate SHA-1, injected at build time (see vite.config.ts). */
+  const __ANDROID_SHA1__: string;
 
   interface Window {
     /** Exposed by electron/preload.cjs in the Windows build only. */

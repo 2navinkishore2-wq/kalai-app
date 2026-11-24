@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
+  DEFAULT_FEED_URL,
+  DEFAULT_RELEASE_PAGE,
+  OFFLINE_CHECK_MESSAGE,
   appVersion,
   assetForPlatform,
   checkForUpdates,
@@ -125,7 +128,10 @@ describe('checkForUpdates', () => {
   it('reports feed failures and bad payloads instead of throwing', async () => {
     const notFound = await checkForUpdates({ currentVersion: '1.3.0', fetchImpl: respond({}, false, 404) });
     expect(notFound.status).toBe('error');
-    expect(notFound.message).toContain('404');
+    // Friendly copy for the user; the HTTP status stays in the technical detail.
+    expect(notFound.message).not.toContain('404');
+    expect(notFound.message).toMatch(/update feed|try again/i);
+    expect(notFound.detail).toContain('404');
 
     const bad = await checkForUpdates({ currentVersion: '1.3.0', fetchImpl: respond({ hello: 'world' }) });
     expect(bad.status).toBe('error');
@@ -137,7 +143,42 @@ describe('checkForUpdates', () => {
       }) as unknown as typeof fetch
     });
     expect(network.status).toBe('error');
-    expect(network.message).toContain('network down');
+    // A raw fetch error is never shown to the user.
+    expect(network.message).toBe(OFFLINE_CHECK_MESSAGE);
+    expect(network.detail).toContain('network down');
+  });
+
+  it('never surfaces "Failed to fetch" to the user', async () => {
+    const result = await checkForUpdates({
+      currentVersion: '1.4.0',
+      fetchImpl: (async () => {
+        throw new TypeError('Failed to fetch');
+      }) as unknown as typeof fetch
+    });
+    expect(result.status).toBe('error');
+    expect(result.message).toBe(OFFLINE_CHECK_MESSAGE);
+    expect(result.detail).toContain('Failed to fetch');
+  });
+
+  it('tries the fallback feed when the primary feed is unreachable', async () => {
+    const urls: string[] = [];
+    const result = await checkForUpdates({
+      currentVersion: '1.3.0',
+      fetchImpl: (async (input: RequestInfo | URL) => {
+        urls.push(String(input));
+        if (urls.length === 1) throw new TypeError('Failed to fetch');
+        return { ok: true, status: 200, json: async () => feed };
+      }) as unknown as typeof fetch
+    });
+    expect(urls.length).toBe(2);
+    expect(result.status).toBe('available');
+    expect(result.release?.version).toBe('1.4.0');
+  });
+
+  it('points the default feed at the public releases repository', () => {
+    expect(DEFAULT_FEED_URL).toContain('raw.githubusercontent.com/2navinkishore2-wq/kalai-app-releases');
+    expect(DEFAULT_FEED_URL.endsWith('latest.json')).toBe(true);
+    expect(DEFAULT_RELEASE_PAGE).toContain('kalai-app-releases');
   });
 });
 

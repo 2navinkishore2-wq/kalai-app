@@ -1,71 +1,157 @@
+/**
+ * Builds the release metadata from the files that were actually built:
+ * copies the signed APK under its release name, then writes SHA256SUMS.txt,
+ * latest.json (the update feed) and build-info.json from real hashes/sizes.
+ *
+ * Run after `npm run electron:build` and `gradlew assembleRelease`.
+ * Version and versionCode are read from package.json / build.gradle, so this
+ * script does not need editing for the next release.
+ */
 const fs = require('fs');
+const path = require('path');
+const crypto = require('crypto');
+const { execFileSync } = require('child_process');
 
-const APK = {
-  size: 10078089,
-  sha: '5473369e8b081e0c9c046613c412f00cf2b61b819ef3175fc0d5dd30272c5b44'
-};
-const EXE = {
-  size: 109200180,
-  sha: '034f385dfed36fd7c7a6f60b9eec7fb9ecc58d296a7c9accf028d6d7ebedac79'
-};
-const BUNDLE = {
-  entry: 'assets/index-Cl3-IPk7.js',
-  sha: 'b8fde933f0874f75b0b4fb52cbfee6c5a8eb23e71c8e6920e9b4cb08e1695c62'
-};
-const COMMIT = 'e535504';
+const VERSION = require('../package.json').version;
+const gradle = fs.readFileSync(path.join('android', 'app', 'build.gradle'), 'utf8');
+const VERSION_CODE = Number((/versionCode\s+(\d+)/.exec(gradle) || [])[1] || 0);
+const gradleVersionName = (/versionName\s+"([^"]+)"/.exec(gradle) || [])[1];
+if (!VERSION_CODE) throw new Error('could not read versionCode from android/app/build.gradle');
+if (gradleVersionName !== VERSION) {
+  throw new Error(`android versionName ${gradleVersionName} does not match package.json ${VERSION}`);
+}
 
-// latest.json
-const feed = JSON.parse(fs.readFileSync('release/latest.json', 'utf8'));
-feed.assets.android.size = APK.size;
-feed.assets.android.sha256 = APK.sha;
-feed.assets.windows.size = EXE.size;
-feed.assets.windows.sha256 = EXE.sha;
-fs.writeFileSync('release/latest.json', `${JSON.stringify(feed, null, 2)}\n`);
+const TAG = `v${VERSION}`;
+const REPO = 'https://github.com/2navinkishore2-wq/kalai-app-releases';
+const ANDROID_ASSET = `KALAI-DIGITAL-${VERSION}.apk`;
+const WINDOWS_ASSET = `KALAI-DIGITAL-Setup-${VERSION}.exe`;
 
-// build-info.json
-const info = JSON.parse(fs.readFileSync('release/build-info.json', 'utf8'));
-info.sourceCommit = COMMIT;
-info.webBundle = {
-  entry: BUNDLE.entry,
-  sha256: BUNDLE.sha,
-  identicalInApkAndExe: true
+function sha256(file) {
+  return crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex');
+}
+
+const candidates = [
+  path.join('android', 'app', 'build', 'outputs', 'apk', 'release', 'app-release.apk'),
+  path.join('android', 'app', 'build', 'outputs', 'apk', 'debug', 'app-debug.apk')
+];
+const builtApk = candidates.find((p) => fs.existsSync(p));
+const apk = path.join('release', ANDROID_ASSET);
+const exe = path.join('release', WINDOWS_ASSET);
+
+if (!builtApk) throw new Error('no built APK found — run the Gradle build first');
+if (!fs.existsSync(exe)) throw new Error(`missing ${exe} — run npm run electron:build first`);
+fs.copyFileSync(builtApk, apk);
+
+const apkSha = sha256(apk);
+const exeSha = sha256(exe);
+const apkSize = fs.statSync(apk).size;
+const exeSize = fs.statSync(exe).size;
+
+// Signing certificate, read from the built APK itself.
+let certificate = process.env.APK_CERT_SHA256 || null;
+let certificateSha1 = process.env.APK_CERT_SHA1 || null;
+try {
+  if (!certificate || !certificateSha1) {
+    const javaHome = process.env.JAVA_HOME || path.join(__dirname, '..', '.tools', 'jdk-17.0.21.1+2');
+    // apksigner.bat cannot be spawned directly from Node on Windows (EINVAL),
+    // so run its jar with the local JDK instead.
+    const out = execFileSync(
+      path.join(javaHome, 'bin', process.platform === 'win32' ? 'java.exe' : 'java'),
+      ['-jar', '.tools/android-sdk/build-tools/34.0.0/lib/apksigner.jar', 'verify', '--print-certs', apk],
+      { encoding: 'utf8', env: { ...process.env, JAVA_HOME: javaHome } }
+    );
+    const line256 = out.split(/\r?\n/).find((l) => /SHA-256 digest/i.test(l));
+    const line1 = out.split(/\r?\n/).find((l) => /SHA-1 digest/i.test(l));
+    certificate = certificate || (line256 ? line256.split(':').slice(-1)[0].trim() : null);
+    certificateSha1 = certificateSha1 || (line1 ? line1.split(':').slice(-1)[0].trim() : null);
+  }
+} catch (error) {
+  console.warn('could not read APK certificate:', error.message);
+}
+
+const commit = execFileSync('git', ['rev-parse', '--short', 'HEAD'], { encoding: 'utf8' }).trim();
+const notes = fs.readFileSync(path.join('release', 'RELEASE_NOTES.md'), 'utf8');
+const notesTaFile = path.join('release', 'RELEASE_NOTES.ta.txt');
+const notesTa = fs.existsSync(notesTaFile) ? fs.readFileSync(notesTaFile, 'utf8') : undefined;
+
+const feed = {
+  version: VERSION,
+  versionCode: VERSION_CODE,
+  notes,
+  ...(notesTa ? { notesTa } : {}),
+  releasedAt: new Date().toISOString(),
+  pageUrl: `${REPO}/releases/tag/${TAG}`,
+  assets: {
+    android: {
+      url: `${REPO}/releases/download/${TAG}/${ANDROID_ASSET}`,
+      size: apkSize,
+      sha256: apkSha
+    },
+    windows: {
+      url: `${REPO}/releases/download/${TAG}/${WINDOWS_ASSET}`,
+      size: exeSize,
+      sha256: exeSha
+    }
+  }
 };
-info.android.sizeBytes = APK.size;
-info.android.sha256 = APK.sha.toUpperCase();
-info.windows.sizeBytes = EXE.size;
-info.windows.sha256 = EXE.sha.toUpperCase();
-fs.writeFileSync('release/build-info.json', `${JSON.stringify(info, null, 2)}\n`);
 
-// SHA256SUMS.txt
+fs.writeFileSync(path.join('release', 'latest.json'), `${JSON.stringify(feed, null, 2)}\n`);
+
 fs.writeFileSync(
-  'release/SHA256SUMS.txt',
-  `KALAI DIGITAL 1.3.0 — SHA-256 checksums
-Built from source revision ${COMMIT} (tag v1.3.0)
+  path.join('release', 'SHA256SUMS.txt'),
+  `KALAI DIGITAL ${VERSION} — SHA-256 checksums
+Built from source revision ${commit} (tag ${TAG})
 
-${APK.sha}  KALAI-DIGITAL-1.3.0.apk
-${EXE.sha}  KALAI-DIGITAL-Setup-1.3.0.exe
+${apkSha}  ${ANDROID_ASSET}
+${exeSha}  ${WINDOWS_ASSET}
 
 Verify on Windows:
-  certutil -hashfile KALAI-DIGITAL-1.3.0.apk SHA256
-  certutil -hashfile KALAI-DIGITAL-Setup-1.3.0.exe SHA256
+  certutil -hashfile ${ANDROID_ASSET} SHA256
+  certutil -hashfile ${WINDOWS_ASSET} SHA256
 
-Android APK: package com.kalaidigital.billing, versionCode 4, versionName 1.3.0,
-signed with certificate SHA-256 7fe43dfc69310fdc4c966c92caefbeb1d9d08dee2f072be6fdc8e971c599defd
-(the same key as the 1.2.0 build, so it installs over it in place).
+Android APK: package com.kalaidigital.billing, versionCode ${VERSION_CODE}, versionName ${VERSION},
+signed with certificate
+  SHA-256 ${certificate || '(see apksigner verify --print-certs)'}
+  SHA-1   ${certificateSha1 || '(see apksigner verify --print-certs)'}
+
+Signing history: 1.3.0 and 1.4.0 were signed with throwaway debug keys that no
+longer exist, so an installed 1.4.0 or older must be uninstalled once before
+this build. 1.5.0 onward share one stable release key, so later versions
+install in place.
 `
 );
 
-// RELEASE_NOTES.md
-let notes = fs.readFileSync('release/RELEASE_NOTES.md', 'utf8');
-notes = notes
-  .replace(/`5bc03d014e03d21a7439fd507cc71579444f319ff9594feac33670e97f42eac5`/g, `\`${APK.sha}\``)
-  .replace(/`13c4d9e0673409814d120dead6f35383a73889b98c5e736d7748413e460bd907`/g, `\`${EXE.sha}\``)
-  .replace(/commit `e30a0b2`/g, `commit \`${COMMIT}\``)
-  .replace(/index-z58-N8r1\.js/g, 'index-Cl3-IPk7.js')
-  .replace(
-    'Saved data stays in place.',
-    'Saved data stays in place, and if a bill is open with unsaved items the app asks you to save or reset it first.'
-  );
-fs.writeFileSync('release/RELEASE_NOTES.md', notes);
+fs.writeFileSync(
+  path.join('release', 'build-info.json'),
+  `${JSON.stringify(
+    {
+      version: VERSION,
+      versionCode: VERSION_CODE,
+      sourceCommit: commit,
+      tag: TAG,
+      builtAt: new Date().toISOString(),
+      android: {
+        package: 'com.kalaidigital.billing',
+        versionName: VERSION,
+        versionCode: VERSION_CODE,
+        fileName: ANDROID_ASSET,
+        sizeBytes: apkSize,
+        sha256: apkSha.toUpperCase(),
+        certificateSha256: certificate,
+        certificateSha1
+      },
+      windows: {
+        fileName: WINDOWS_ASSET,
+        sizeBytes: exeSize,
+        sha256: exeSha.toUpperCase()
+      }
+    },
+    null,
+    2
+  )}\n`
+);
 
-console.log('updated release metadata');
+console.log(`APK  ${apkSize} bytes ${apkSha}`);
+console.log(`EXE  ${exeSize} bytes ${exeSha}`);
+console.log(`cert sha1 ${certificateSha1} sha256 ${certificate}`);
+console.log(`feed release/latest.json for ${TAG} @ ${commit} (versionCode ${VERSION_CODE})`);

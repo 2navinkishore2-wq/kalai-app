@@ -6,7 +6,11 @@ import pkg from './package.json';
 export default defineConfig({
   base: './',
   define: {
-    __APP_VERSION__: JSON.stringify(pkg.version)
+    __APP_VERSION__: JSON.stringify(pkg.version),
+    // SHA-1 of the certificate used to sign the Android APK. Shown in
+    // Settings so the owner can register it in the Firebase console for
+    // Google Sign-In. Public information; injected at build time.
+    __ANDROID_SHA1__: JSON.stringify((process.env.ANDROID_SHA1 || '').trim())
   },
   plugins: [
     react(),
