@@ -94,14 +94,23 @@ npm run android:shas
 
 This prints the debug keystore fingerprint (and the release one when `android/keystore.properties` exists).
 
+Since 1.5.0 the app also shows the fingerprint it was built with: **Settings → About & Updates → Android signing**. Copy it from there — it is the exact certificate of the installed APK.
+
+Release key for 1.5.0 and later (`android/kalai-release.jks`):
+
+```text
+SHA-1   5B:6B:AE:01:5D:21:0F:FB:77:88:B4:A8:83:CB:AB:0F:17:E4:DC:9F
+SHA-256 FE:09:03:63:39:F0:DF:01:C6:35:FF:2A:8C:25:5E:8E:BE:11:AD:57:C4:18:81:6F:47:FA:02:2F:F2:40:81:29
+```
+
 ### 5.2 Register the Android app
 
 1. Firebase Console → **Project settings → Your apps → Add app → Android**.
 2. Package name: `com.kalaidigital.billing`.
 3. Nickname: `KALAI DIGITAL`.
-4. Paste the **debug SHA-1**.
+4. Paste the **release SHA-1** (the value shown in Settings → About & Updates).
 5. Register the app.
-6. Optionally download `google-services.json` to `android/app/google-services.json`.
+6. `google-services.json` is **not required**: sign-in goes through Android's Credential Manager with the Web OAuth client ID, not the Firebase native SDK. Do not add it just for sign-in.
 
 ### 5.3 Confirm the OAuth clients
 
@@ -119,9 +128,10 @@ This is the **web** client ID (client_type 3), not the Android client ID. It is 
 ### 5.4 Rebuild
 
 ```bash
-npm run android:apk
-adb install -r "release/KALAI DIGITAL 1.2.0.apk"
+npm run android:release
 ```
+
+The release APK is written to `android/app/build/outputs/apk/release/app-release.apk` and is signed with `android/kalai-release.jks` when `android/keystore.properties` exists.
 
 For a release APK, add the **release keystore SHA-1** too. If you publish through Google Play with App Signing, add the Play App Signing SHA-1 as well.
 
