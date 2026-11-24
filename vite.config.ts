@@ -40,7 +40,10 @@ export default defineConfig({
   server: {
     port: 5176,
     strictPort: false,
-    host: true
+    host: true,
+    // Build output and toolchains are not source: watching them made the dev
+    // server crash with EBUSY while a Windows/Android build was running.
+    watch: { ignored: ['**/release/**', '**/android/**', '**/.tools/**', '**/dist/**'] }
   },
   build: {
     outDir: 'dist',
