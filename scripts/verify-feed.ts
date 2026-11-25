@@ -1,23 +1,36 @@
 /**
  * Checks the published update feed with the same code the apps use.
  *
- *   npx tsx scripts/verify-feed.ts [currentVersion] [feedUrl]
+ *   npx tsx scripts/verify-feed.ts [currentVersion] [feedUrl] [currentVersionCode]
  *
  * Exit code 0 means the feed is reachable, parses, lists an installer for both
  * platforms and its checksums match the published values.
  */
 import { createHash } from 'node:crypto';
+import { readFileSync } from 'node:fs';
 import {
   DEFAULT_FEED_URL,
   appVersion,
   assetForPlatform,
   checkForUpdates,
   compareVersions,
+  isNewerBuild,
   parseRelease
 } from '../src/lib/updates';
 
+/** versionCode of the APK built from this checkout. */
+function localVersionCode(): number {
+  try {
+    const gradle = readFileSync('android/app/build.gradle', 'utf8');
+    return Number((/versionCode\s+(\d+)/.exec(gradle) || [])[1] || 0);
+  } catch {
+    return 0;
+  }
+}
+
 const currentVersion = process.argv[2] || (appVersion() === '0.0.0' ? '1.3.0' : appVersion());
 const feedUrl = process.argv[3] || DEFAULT_FEED_URL;
+const currentVersionCode = Number(process.argv[4] || 0) || localVersionCode();
 
 async function main() {
   console.log(`feed:    ${feedUrl}`);
@@ -29,10 +42,17 @@ async function main() {
   const release = parseRelease(payload);
   if (!release) throw new Error('feed did not parse into a release');
 
-  console.log(`latest:  ${release.version} (${compareVersions(release.version, currentVersion) > 0 ? 'newer' : 'not newer'})`);
+  // A hotfix keeps the versionName and only raises versionCode, so the check
+  // must use the same rule the Android app uses.
+  const newer = isNewerBuild(release, currentVersion, currentVersionCode);
+  const codeNote =
+    compareVersions(release.version, currentVersion) === 0 && release.versionCode
+      ? ` versionCode ${release.versionCode} vs ${currentVersionCode}`
+      : '';
+  console.log(`latest:  ${release.version}${codeNote} (${newer ? 'newer' : 'not newer'})`);
   console.log(`notes:   ${release.notes.split('\n')[0].slice(0, 90)}…`);
 
-  const result = await checkForUpdates({ currentVersion, feedUrl });
+  const result = await checkForUpdates({ currentVersion, currentVersionCode, feedUrl });
   console.log(`status:  ${result.status}`);
 
   for (const platform of ['android', 'windows'] as const) {
