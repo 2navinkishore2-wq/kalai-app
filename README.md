@@ -12,8 +12,8 @@ One codebase runs on **Android (APK)**, **Windows (installer)** and the **web**,
 
 | Artifact | Path | Built from |
 |---|---|---|
-| Android release APK | `release/KALAI-DIGITAL-1.7.0.apk` (Gradle output `android/app/build/outputs/apk/release/app-release.apk`) | current source, package `com.kalaidigital.billing`, versionCode `9`, versionName `1.7.0`, signed with the stable release key (`android/kalai-release.jks`, not in git) |
-| Windows installer | `release/KALAI-DIGITAL-Setup-1.7.0.exe` | current source, Electron 32, version `1.7.0`, identity `com.kalaidigital.billing` |
+| Android release APK | `release/KALAI-DIGITAL-1.8.0.apk` (Gradle output `android/app/build/outputs/apk/release/app-release.apk`) | current source, package `com.kalaidigital.billing`, versionCode `12`, versionName `1.8.0`, signed with the stable release key (`android/kalai-release.jks`, not in git) |
+| Windows installer | `release/KALAI-DIGITAL-Setup-1.8.0.exe` | current source, Electron 32, version `1.8.0`, identity `com.kalaidigital.billing` |
 | Update feed | `release/latest.json` | published with every release; read by Settings → About & Updates |
 | Web / PWA | `dist/` (after `npm run build`) | Vite production build |
 

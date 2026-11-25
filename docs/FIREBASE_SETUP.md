@@ -112,6 +112,8 @@ SHA-256 FE:09:03:63:39:F0:DF:01:C6:35:FF:2A:8C:25:5E:8E:BE:11:AD:57:C4:18:81:6F:
 5. Register the app.
 6. `google-services.json` is **not required**: sign-in goes through Android's Credential Manager with the Web OAuth client ID, not the Firebase native SDK. Do not add it just for sign-in.
 
+> **Registered on 25 Nov 2026 for the 1.7.0 build:** the release SHA-1 above is stored on the `kalaidigital` Android app (`com.kalaidigital.billing`), and Google created the matching **Android OAuth client** (`14433888058-qnoaj…`). The OAuth consent screen is **External / In production**, so no test-user list is needed. APKs signed with `android/kalai-release.jks` need no further Firebase work.
+
 ### 5.3 Confirm the OAuth clients
 
 In **Google Cloud Console → APIs & Services → Credentials** (same project):
@@ -139,7 +141,8 @@ For a release APK, add the **release keystore SHA-1** too. If you publish throug
 
 | Message | Cause | Fix |
 |---|---|---|
-| `Developer console is not set up correctly` | No Android OAuth client for this package + SHA-1 | Repeat §5.2 with the correct fingerprint |
+| `[16] Account reauth failed` | Credential Manager could not verify the app: no **Android OAuth client** for `com.kalaidigital.billing` + this APK's SHA-1 (or the consent screen is Internal / the account is not a test user) | Repeat §5.2 with the fingerprint from Settings → About & Updates, then add the account under Audience → Test users while the app is in Testing |
+| `Developer console is not set up correctly` | Wrong client ID: the **Android** client ID was used instead of the Web client ID | Put the Web client ID (`client_type 3`) in `VITE_GOOGLE_WEB_CLIENT_ID` |
 | `auth/unauthorized-domain` on web/Windows | Domain missing from authorized domains | Add it in Authentication → Settings |
 | `VITE_GOOGLE_WEB_CLIENT_ID is not set` | `.env` missing the web client ID | Add it and rebuild |
 | Sign-in works on web but not Android | APK signed with a different keystore or old install | Uninstall the old app, rebuild with the registered SHA-1 |
