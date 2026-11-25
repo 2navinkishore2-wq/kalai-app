@@ -1,4 +1,5 @@
 import type { Bill, BusinessSettings } from '../lib/types';
+import { isSqftProduct } from '../lib/constants';
 import { formatDate, formatINR } from '../lib/format';
 import { logoSrc } from '../lib/logo';
 import { absoluteAssetUrl, paymentMobile, paymentSnapshotFor } from '../lib/payment';
@@ -25,9 +26,11 @@ export function receiptHtml(bill: Bill, settings: BusinessSettings): string {
             <div class="meta">${esc(
               item.product === 'FRAME'
                 ? `${item.frameSizeLabel || ''}${item.beading ? ` · Beading: ${item.beading}` : ''}`
-                : `${item.widthEntered ?? item.widthIn ?? ''} x ${item.heightEntered ?? item.heightIn ?? ''} ${item.unit || 'in'}${item.chargeableSqft ? ` · ${item.chargeableSqft} sq.ft` : ''}`
+                : item.product === 'CUSTOM'
+                  ? item.customUnit || ''
+                  : `${item.widthEntered ?? item.widthIn ?? ''} x ${item.heightEntered ?? item.heightIn ?? ''} ${item.unit || 'in'}${item.chargeableSqft ? ` · ${item.chargeableSqft} sq.ft` : ''}`
             )}</div>
-            <div class="meta">${item.qty} x ${esc(formatINR(item.rate))}${item.product !== 'FRAME' ? (item.basisSqft === 1 ? ' / sq.ft' : ` / ${item.basisSqft} sq.ft`) : ''}</div>
+            <div class="meta">${item.qty} x ${esc(formatINR(item.rate))}${isSqftProduct(item.product) ? (item.basisSqft === 1 ? ' / sq.ft' : ` / ${item.basisSqft} sq.ft`) : ''}</div>
           </td>
           <td class="amt">${esc(formatINR(item.amount))}</td>
         </tr>`

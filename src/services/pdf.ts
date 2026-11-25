@@ -1,6 +1,7 @@
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import type { Bill, BillItem, BusinessSettings, PaymentSnapshot } from '../lib/types';
+import { isSqftProduct } from '../lib/constants';
 import { itemNameLabel } from '../lib/itemName';
 import { formatDate } from '../lib/format';
 import { absoluteAssetUrl, paymentMobile, paymentSnapshotFor } from '../lib/payment';
@@ -280,11 +281,13 @@ export function buildInvoicePdf(bill: Bill, settings: BusinessSettings, qr: QrIm
       invoiceItemCell(item),
       item.product === 'FRAME'
         ? `${item.frameSizeLabel || ''}${item.beading ? `\nBeading: ${item.beading}` : ''}`
-        : `${item.widthEntered ?? item.widthIn ?? ''}x${item.heightEntered ?? item.heightIn ?? ''} ${item.unit || 'in'}`
+        : item.product === 'CUSTOM'
+          ? item.customUnit || ''
+          : `${item.widthEntered ?? item.widthIn ?? ''}x${item.heightEntered ?? item.heightIn ?? ''} ${item.unit || 'in'}`
     ];
-    if (settings.showSqftOnInvoice) row.push(item.product === 'FRAME' ? '-' : String(item.chargeableSqft ?? item.areaSqft ?? ''));
+    if (settings.showSqftOnInvoice) row.push(isSqftProduct(item.product) ? String(item.chargeableSqft ?? item.areaSqft ?? '') : '-');
     if (settings.showRateOnInvoice) {
-      row.push(`${pdfMoney(item.rate)}${item.product !== 'FRAME' ? (item.basisSqft === 1 ? ' / sq.ft' : ` / ${item.basisSqft} sq.ft`) : ''}`);
+      row.push(`${pdfMoney(item.rate)}${isSqftProduct(item.product) ? (item.basisSqft === 1 ? ' / sq.ft' : ` / ${item.basisSqft} sq.ft`) : ''}`);
     }
     row.push(String(item.qty), pdfMoney(item.amount));
     return row;

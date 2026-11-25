@@ -26,6 +26,10 @@ interface ItemForm {
   qty: string;
   frameSizeId: string;
   beading: string;
+  /** Custom line: shop-specific item with its own name, price and unit. */
+  customName: string;
+  customRate: string;
+  customUnit: string;
   /** Optional name of the person this print is for (never a customer). */
   itemName: string;
 }
@@ -46,6 +50,9 @@ const emptyForm = (product: ProductKey, frameSizeId = ''): ItemForm => ({
   qty: '1',
   frameSizeId,
   beading: DEFAULT_BEADING,
+  customName: '',
+  customRate: '',
+  customUnit: 'Nos.',
   itemName: ''
 });
 
@@ -74,6 +81,7 @@ function unitShort(unit: Unit): string {
 /** The size as typed on the entry form, with inches as the fallback for old bills. */
 function itemDimensions(item: BillItem): string {
   if (item.product === 'FRAME') return item.frameSizeLabel || '';
+  if (item.product === 'CUSTOM') return item.customUnit || '';
   if (item.widthEntered != null && item.heightEntered != null && item.unit) {
     return `${item.widthEntered}×${item.heightEntered} ${unitShort(item.unit)}`;
   }
@@ -240,6 +248,11 @@ export function BillingPage() {
   }, [form.height, form.unit]);
 
   const preview = useMemo(() => {
+    if (form.product === 'CUSTOM') {
+      const rate = parseFloat(form.customRate);
+      if (!Number.isFinite(rate) || rate <= 0 || qtyNum <= 0) return null;
+      return { kind: 'custom' as const, amount: round2(rate * qtyNum), rate: round2(rate) };
+    }
     if (form.product === 'FRAME') {
       if (!frameRow) return null;
       return {
@@ -291,6 +304,9 @@ export function BillingPage() {
       qty: String(it.qty),
       frameSizeId: it.frameSizeId || activeFrames[0]?.id || '',
       beading: normalizeBeading(it.beading),
+      customName: it.product === 'CUSTOM' ? it.label : '',
+      customRate: it.product === 'CUSTOM' ? String(it.rate) : '',
+      customUnit: it.product === 'CUSTOM' ? it.customUnit || 'Nos.' : 'Nos.',
       itemName: it.itemName || ''
     });
     window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -299,6 +315,24 @@ export function BillingPage() {
   const addItem = () => {
     setFormError('');
     if (qtyNum <= 0) return setFormError('Enter a quantity greater than zero.');
+    if (form.product === 'CUSTOM') {
+      const name = cleanItemName(form.customName);
+      if (!name) return setFormError('Enter the custom item name.');
+      const rate = parseFloat(form.customRate);
+      if (!Number.isFinite(rate) || rate <= 0) return setFormError('Enter a custom price greater than zero.');
+      const unit = form.customUnit.trim().slice(0, 20) || 'Nos.';
+      upsert({
+        key: editingKey || itemKey(),
+        product: 'CUSTOM',
+        label: name,
+        customUnit: unit,
+        rate: round2(rate),
+        qty: qtyNum,
+        amount: round2(rate * qtyNum),
+        note: `${formatINR(round2(rate))} per ${unit}`
+      });
+      return;
+    }
     if (!productConfig?.active) return setFormError('This product is inactive. Enable it in Products & Rates.');
     if (form.product === 'FRAME') {
       if (!frameRow) return setFormError('Select a frame size. Add sizes in Products & Rates if the list is empty.');
@@ -564,13 +598,54 @@ export function BillingPage() {
                   </button>
                 );
               })}
+              <button
+                className={`chip${form.product === 'CUSTOM' ? ' active' : ''}`}
+                onClick={() => switchProduct('CUSTOM')}
+                title="Any other shop item: type its name and price"
+              >
+                {PRODUCT_NAMES.CUSTOM[lang] || PRODUCT_NAMES.CUSTOM.en}
+              </button>
             </div>
 
             {productConfig && !productConfig.active ? (
               <SectionNote tone="warn">This product is inactive. Re-enable it in Products &amp; Rates before billing.</SectionNote>
             ) : null}
 
-            {form.product === 'FRAME' ? (
+            {form.product === 'CUSTOM' ? (
+              <div>
+                <div className="input-row">
+                  <Field label="Item Name" required hint="Any extra service or item">
+                    <Input
+                      value={form.customName}
+                      onChange={(e) => setForm({ ...form, customName: e.target.value })}
+                      maxLength={ITEM_NAME_MAX}
+                      placeholder="e.g. Banner installation, Special printing…"
+                    />
+                  </Field>
+                  <Field label="Price (₹)" hint="Per unit">
+                    <Input type="number" inputMode="decimal" min={0} step="any" value={form.customRate} onChange={(e) => setForm({ ...form, customRate: e.target.value })} placeholder="0" />
+                  </Field>
+                  <Field label="Quantity">
+                    <Input type="number" inputMode="numeric" min={1} value={form.qty} onChange={(e) => setForm({ ...form, qty: e.target.value })} />
+                  </Field>
+                  <Field label="Unit" hint="Nos., piece, sq.ft…">
+                    <Input value={form.customUnit} onChange={(e) => setForm({ ...form, customUnit: e.target.value })} maxLength={20} placeholder="Nos." />
+                  </Field>
+                </div>
+                <div className="calc-preview" style={{ marginTop: 12 }}>
+                  {preview?.kind === 'custom' ? (
+                    <span>
+                      {formatINR(preview.rate)} × {qtyNum} {form.customUnit.trim() || 'Nos.'} = <b style={{ color: 'var(--brand-600)' }}>{formatINR(preview.amount)}</b>
+                      <span className="cell-sub" style={{ display: 'block', marginTop: 3 }}>
+                        Custom line: the name and price you type are used exactly as entered. No rate table is applied.
+                      </span>
+                    </span>
+                  ) : (
+                    <span style={{ color: 'var(--text-3)' }}>Enter the item name, price and quantity to see the amount.</span>
+                  )}
+                </div>
+              </div>
+            ) : form.product === 'FRAME' ? (
               <div>
                 <div className="input-row">
                   <Field label="Frame Size" hint="Inches · fixed price per piece">
@@ -671,6 +746,7 @@ export function BillingPage() {
               </div>
             )}
 
+            {form.product !== 'CUSTOM' ? (
             <div className="input-row" style={{ marginTop: 12, maxWidth: 460 }}>
               <Field
                 label={<span>Item Name / <span lang="ta">யாருக்கானது?</span> <span style={{ fontWeight: 400, color: 'var(--text-3)' }}>(optional)</span></span>}
@@ -684,6 +760,7 @@ export function BillingPage() {
                 />
               </Field>
             </div>
+            ) : null}
 
             {formError ? <div className="form-error" style={{ marginTop: 9 }}>{formError}</div> : null}
             <div className="row" style={{ marginTop: 12, gap: 9 }}>
@@ -721,6 +798,8 @@ export function BillingPage() {
                               {it.frameSizeLabel}
                               {it.beading ? <div className="cell-sub">Beading: {it.beading}</div> : null}
                             </>
+                          ) : it.product === 'CUSTOM' ? (
+                            <>{it.customUnit || '—'}</>
                           ) : (
                             <>{itemDimensions(it)} · {it.areaSqft} sq.ft</>
                           )}

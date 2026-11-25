@@ -13,7 +13,8 @@ export const PRODUCT_NAMES: Record<ProductKey, { en: string; ta: string }> = {
   FLEX: { en: 'Flex', ta: 'ஃபிளக்ஸ்' },
   SUNPACK: { en: 'Sunpack', ta: 'சன்பேக்' },
   VINYL: { en: 'Vinyl', ta: 'வினைல்' },
-  STAR: { en: 'Star', ta: 'ஸ்டார்' }
+  STAR: { en: 'Star', ta: 'ஸ்டார்' },
+  CUSTOM: { en: 'Custom', ta: 'கஸ்டம்' }
 };
 
 export const PAYMENT_METHODS: PaymentMethod[] = ['Cash', 'UPI', 'Bank Transfer', 'Other', 'Credit'];

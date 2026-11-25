@@ -1,6 +1,6 @@
 /** KALAI DIGITAL — shared domain types. */
 
-export type ProductKey = 'FRAME' | 'FLEX' | 'SUNPACK' | 'VINYL' | 'STAR';
+export type ProductKey = 'FRAME' | 'FLEX' | 'SUNPACK' | 'VINYL' | 'STAR' | 'CUSTOM';
 export type PricingMode = 'fixed' | 'sqft';
 export type RoundingMode = 'none' | 'nearest' | 'up' | 'down';
 export type DiscountType = 'amount' | 'percent';
@@ -129,6 +129,8 @@ export interface BillItem {
   rate: number;
   qty: number;
   amount: number;
+  /** Unit typed on a Custom line (e.g. Nos., piece, sq.ft). */
+  customUnit?: string;
   frameSizeId?: string;
   frameSizeLabel?: string;
   /** Frame beading choice recorded on the bill (price unchanged by beading). */

@@ -113,7 +113,9 @@ export function productSales(bills: Bill[]): ProductReportRow[] {
   const map = new Map<ProductKey, ProductReportRow>();
   for (const b of live) {
     for (const item of b.items) {
-      const row = map.get(item.product) || { product: item.product, label: item.label, qty: 0, sqft: 0, sales: 0, cost: 0 };
+      const row =
+        map.get(item.product) ||
+        { product: item.product, label: item.product === 'CUSTOM' ? 'Custom' : item.label, qty: 0, sqft: 0, sales: 0, cost: 0 };
       row.qty += item.qty;
       row.sqft += item.chargeableSqft || item.areaSqft || 0;
       row.sales += item.amount;

@@ -7,7 +7,7 @@ import { platformLabel } from '../lib/platform';
 import { Button, Card, PageHeader, Pill, SectionNote } from '../components/ui';
 
 const FEATURES = [
-  'Five products: Frame, Flex, Sunpack, Vinyl and Star',
+  'Five products — Frame, Flex, Sunpack, Vinyl, Star — plus a Custom line with your own name and price',
   'Frame prices entered from the shop rate chart, never invented',
   'Square-feet billing with a configurable 16 sq.ft basis',
   'Minimum charge, rupee rounding, discounts and optional GST',

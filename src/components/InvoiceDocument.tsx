@@ -1,4 +1,5 @@
 import type { Bill, BusinessSettings } from '../lib/types';
+import { isSqftProduct } from '../lib/constants';
 import { formatDate, formatINR } from '../lib/format';
 import { logoSrc } from '../lib/logo';
 import { PaymentBlock } from './PaymentBlock';
@@ -74,12 +75,14 @@ export function InvoiceDocument({ bill, settings }: { bill: Bill; settings: Busi
                     {it.frameSizeLabel}
                     {it.beading ? <div style={{ color: '#6b5a50', fontSize: 9.5 }}>Beading: {it.beading}</div> : null}
                   </>
+                ) : it.product === 'CUSTOM' ? (
+                  it.customUnit || '—'
                 ) : (
                   `${it.widthEntered ?? it.widthIn}×${it.heightEntered ?? it.heightIn} ${it.unit || 'in'}`
                 )}
               </td>
-              {showSqft ? <td className="num" data-label="Sq.ft">{it.product === 'FRAME' ? '—' : it.areaSqft}</td> : null}
-              {showRate ? <td className="num" data-label="Rate">{formatINR(it.rate)}{it.product !== 'FRAME' ? (it.basisSqft === 1 ? ' / sq.ft' : ` / ${it.basisSqft} sq.ft`) : ''}</td> : null}
+              {showSqft ? <td className="num" data-label="Sq.ft">{isSqftProduct(it.product) ? it.areaSqft : '—'}</td> : null}
+              {showRate ? <td className="num" data-label="Rate">{formatINR(it.rate)}{isSqftProduct(it.product) ? (it.basisSqft === 1 ? ' / sq.ft' : ` / ${it.basisSqft} sq.ft`) : ''}</td> : null}
               <td className="num" data-label="Qty">{it.qty}</td>
               <td className="num" data-label="Amount"><b>{formatINR(it.amount)}</b></td>
             </tr>

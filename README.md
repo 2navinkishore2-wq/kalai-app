@@ -12,8 +12,8 @@ One codebase runs on **Android (APK)**, **Windows (installer)** and the **web**,
 
 | Artifact | Path | Built from |
 |---|---|---|
-| Android release APK | `release/KALAI-DIGITAL-1.8.0.apk` (Gradle output `android/app/build/outputs/apk/release/app-release.apk`) | current source, package `com.kalaidigital.billing`, versionCode `12`, versionName `1.8.0`, signed with the stable release key (`android/kalai-release.jks`, not in git) |
-| Windows installer | `release/KALAI-DIGITAL-Setup-1.8.0.exe` | current source, Electron 32, version `1.8.0`, identity `com.kalaidigital.billing` |
+| Android release APK | `release/KALAI-DIGITAL-1.9.0.apk` (Gradle output `android/app/build/outputs/apk/release/app-release.apk`) | current source, package `com.kalaidigital.billing`, versionCode `13`, versionName `1.9.0`, signed with the stable release key (`android/kalai-release.jks`, not in git) |
+| Windows installer | `release/KALAI-DIGITAL-Setup-1.9.0.exe` | current source, Electron 32, version `1.9.0`, identity `com.kalaidigital.billing` |
 | Update feed | `release/latest.json` | published with every release; read by Settings → About & Updates |
 | Web / PWA | `dist/` (after `npm run build`) | Vite production build |
 
@@ -31,6 +31,7 @@ From 1.5.0 onwards the APK is signed with the stable release keystore created fo
 - Dimensions entered in **inches, centimetres or feet**; the app converts to inches and square feet.
 - **FRAME** uses the fixed size-wise price table (19 supplied sizes, ₹250–₹5,750) with a **Beading** choice (1 inch, 1½ inches, 2 inches) recorded on the bill. The supplied chart has one price per size, so beading never changes the price.
 - **FLEX / VINYL / STAR** are entered in **feet** by default and priced **per sq.ft** (opening rates ₹16 / ₹25 / ₹25). **SUNPACK** keeps its square-feet calculation with the configurable basis (default **16 sq.ft**) and owner-set rate.
+- **CUSTOM (1.9.0+)** is a free line for anything else: type the item name, a price, the quantity and a unit (Nos., piece, sq.ft…). The amount is price × quantity with no rate table, it is printed on the invoice and receipts like any other line, and it never changes the product rates.
 - Discount as ₹ amount or %, additional charges (delivery, lamination, installation), optional GST (exclusive or inclusive), and a bill note.
 - **Split payments** — Cash + UPI + Bank Transfer + Other, each with its own date and reference.
 - Unique bill numbers (`KD-YYYY-0001` by default, pattern editable in Settings).
