@@ -83,7 +83,24 @@ export interface NativeGoogleBridge {
  * `registerPlugin` is public Capacitor API; calling it on the web is harmless
  * because every entry point here is guarded by `isNative()`.
  */
-const nativeGoogleBridge = registerPlugin<NativeGoogleBridge>('KalaiGoogleSignIn');
+const plugin = registerPlugin<NativeGoogleBridge>('KalaiGoogleSignIn');
+
+/**
+ * Capacitor's `registerPlugin()` returns a Proxy whose `get` answers EVERY
+ * property with a function — including `then`. So the proxy itself is a
+ * thenable: handing it to a promise (an async function's return value is
+ * resolved like a promise) makes the engine call `plugin.then(resolve,
+ * reject)`, which Capacitor turns into a native call for a method that does
+ * not exist. That call never settles, the awaiting promise never settles, and
+ * only the 10 s bound ends it — which is exactly the
+ * "The Google sign-in module did not load." screen, with the account chooser
+ * never even requested. Calling the proxy through explicit functions hands out
+ * a plain, non-thenable bridge instead.
+ */
+const nativeGoogleBridge: NativeGoogleBridge = {
+  signIn: (options) => plugin.signIn(options),
+  clearCredentialState: () => plugin.clearCredentialState()
+};
 
 export interface NativeGoogleDeps {
   isNative(): boolean;
@@ -98,7 +115,8 @@ export interface NativeGoogleDeps {
 const DEFAULT_SIGN_IN_TIMEOUT_MS = 90_000;
 const DEFAULT_CLEAR_TIMEOUT_MS = 6_000;
 
-const defaultDeps: NativeGoogleDeps = {
+/** The real bridge used by the app. Exported so tests can prove it is plain. */
+export const defaultDeps: NativeGoogleDeps = {
   isNative,
   webClientId: nativeWebClientId,
   loadBridge: async () => nativeGoogleBridge
@@ -118,6 +136,9 @@ export function diag(stage: string, detail?: string): void {
 
 const CONFIG_MESSAGE =
   'This APK’s Google sign-in configuration does not match the installed build. In Firebase → Project settings → Your apps, the Android app for package com.kalaidigital.billing must include this APK’s SHA-1 fingerprint, and the Web client ID must come from the same Firebase project.';
+
+const MISSING_PLUGIN_MESSAGE =
+  'This APK does not contain the native Google sign-in plugin. Install the latest KALAI DIGITAL build.';
 
 const RETRY_MESSAGE =
   'Google still refuses this account after one retry. Check that the OAuth consent screen is External, that this Google account is listed under Audience → Test users (or the app is published), and that the APK’s SHA-1 is registered in Firebase → Project settings → Your apps.';
@@ -179,6 +200,11 @@ export function classifyNativeGoogleFailure(rawMessage: string): {
       code: 'NETWORK',
       message: 'Google could not be reached. Check the internet connection and try again.'
     };
+  }
+
+  // A plugin missing from the native side rejects with Capacitor's message.
+  if (/not\s*implemented|unimplemented/i.test(msg)) {
+    return { code: 'NOT_CONFIGURED', message: MISSING_PLUGIN_MESSAGE };
   }
 
   return { code: 'FAILED', message: `Native Google sign-in failed: ${msg}` };
@@ -301,10 +327,7 @@ async function runSignIn(deps: NativeGoogleDeps): Promise<NativeGoogleUser> {
   } catch (error) {
     // A missing/old native side reads as "not implemented" from Capacitor.
     const e = /not implemented|unimplemented/i.test(messageOf(error))
-      ? new NativeGoogleSignInError(
-          'This APK does not contain the native Google sign-in plugin. Install the latest KALAI DIGITAL build.',
-          'NOT_CONFIGURED'
-        )
+      ? new NativeGoogleSignInError(MISSING_PLUGIN_MESSAGE, 'NOT_CONFIGURED')
       : toSignInError(error);
     diag('bridge-failed', e.code);
     throw e;

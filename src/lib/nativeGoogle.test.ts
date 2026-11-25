@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi, type Mock } from 'vitest';
 import {
   NativeGoogleSignInError,
   classifyNativeGoogleFailure,
+  defaultDeps,
   nativeCodeOf,
   resetNativeGoogleForTests,
   signInWithNativeGoogle,
@@ -65,6 +66,22 @@ describe('classifyNativeGoogleFailure', () => {
 
   it('treats a silent native timeout as its own, explained state', () => {
     expect(classifyNativeGoogleFailure('Google did not answer in time').code).toBe('TIMEOUT');
+  });
+});
+
+describe('default bridge', () => {
+  /**
+   * The hotfix1 bug: Capacitor's plugin proxy answers every property with a
+   * function, so it is thenable. Awaiting it made the engine wait for a
+   * `then()` native call that never settles, and the user saw "The Google
+   * sign-in module did not load." after the 10 s bound.
+   */
+  it('hands over a plain bridge, never the thenable Capacitor proxy', async () => {
+    const bridge = await defaultDeps.loadBridge();
+    expect(typeof bridge).toBe('object');
+    expect((bridge as unknown as { then?: unknown }).then).toBeUndefined();
+    expect(typeof bridge.signIn).toBe('function');
+    expect(typeof bridge.clearCredentialState).toBe('function');
   });
 });
 
@@ -142,6 +159,15 @@ describe('signInWithNativeGoogle', () => {
     d.webClientId = () => '';
     await expect(signInWithNativeGoogle(d)).rejects.toMatchObject({ code: 'NOT_CONFIGURED' });
     expect(d.signIn).not.toHaveBeenCalled();
+  });
+
+  it('explains a plugin that is missing when the first call is made', async () => {
+    const d = makeDeps(
+      vi.fn().mockRejectedValue(new Error('"KalaiGoogleSignIn.signIn()" is not implemented on android'))
+    );
+    const error = (await signInWithNativeGoogle(d).catch((e: NativeGoogleSignInError) => e)) as NativeGoogleSignInError;
+    expect(error.code).toBe('NOT_CONFIGURED');
+    expect(error.message).toMatch(/latest KALAI DIGITAL build/i);
   });
 
   it('rejects on the web instead of calling a plugin that is not there', async () => {

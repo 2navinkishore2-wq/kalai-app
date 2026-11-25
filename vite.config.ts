@@ -32,6 +32,9 @@ export default defineConfig({
     react(),
     VitePWA({
       registerType: 'autoUpdate',
+      // Registered at runtime instead (src/lib/serviceWorker.ts): inside the
+      // Android WebView the worker would keep serving the previous APK's files.
+      injectRegister: false,
       includeAssets: ['logo.png', 'icons/icon-192.png', 'icons/icon-512.png', 'icons/maskable-512.png'],
       manifest: {
         name: 'KALAI DIGITAL',
